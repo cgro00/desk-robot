@@ -38,8 +38,10 @@ HUMAN_NAME = os.environ.get("HUMAN_NAME", "friend")
 #
 # The model must accept images (Rocky sends camera frames) and tool calls
 # (he moves his head with them).
-LLM_BASE_URL = "https://openrouter.ai/api/v1"
-MODEL = "anthropic/claude-haiku-4.5"
+
+# LLM_BASE_URL and MODEL in server/.env override the defaults below.
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+MODEL = os.environ.get("MODEL", "anthropic/claude-haiku-4.5")
 
 # WebSocket port the robot connects to.
 PORT = 8765
