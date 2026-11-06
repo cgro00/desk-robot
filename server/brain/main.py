@@ -45,7 +45,8 @@ import time
 
 import websockets
 
-from . import computer, config, faces, mouth, personality, settings
+from . import computer, config, decisions, faces, mouth, personality, settings
+from . import focus as focus_mode
 from .body import Body
 from .dance import Dancer, length as dance_length
 from .thinking import Interrupted, RobotBrain
@@ -73,6 +74,7 @@ head_moves: asyncio.Queue[tuple[float | None, float | None, bool]] = asyncio.Que
 tracker: Tracker | None = None
 perception: Perception | None = None
 body: Body | None = None   # small head moves while he talks (body.py)
+focus = focus_mode.Focus()   # focus sessions: he keeps you off your phone (focus.py)
 # The newest sharp still from the robot (rotated like the stream) and when it arrived; asked for as soon as you
 # start talking, so it's ready by the time the question is.
 snapshot: tuple[bytes, float] = (b"", 0.0)
@@ -521,11 +523,56 @@ async def _before_dancing() -> None:
     await set_head_held(False)
 
 
+async def start_focus(minutes: float | None, announce: bool) -> str:
+    """Start a focus session (focus.py), awake. announce: he says so himself (started from the dashboard; by voice,
+    the model already has)."""
+    global awake_until
+    if time.time() >= awake_until:
+        awake_until = time.time() + config.AWAKE_SECONDS
+        await wake_up()
+    text = focus.start(minutes)
+    if announce:
+        asyncio.create_task(converse(focus.note("start"), interruptible=False))
+    return text
+
+
+async def focus_ability(args: dict) -> tuple:
+    """The `focus_mode` ability: start a focus session. (Nothing he hears reaches the model during one, so stopping
+    is "hey Rocky, stop focus" in _handle_heard, or the dashboard.)"""
+    try:
+        minutes = float(args["minutes"]) if args.get("minutes") is not None else None
+    except (TypeError, ValueError):
+        minutes = None
+    return (await start_focus(minutes, announce=False), None, True)
+
+
+async def focus_react(event: str) -> None:
+    """Focus mode caught you on your phone ("nag"), saw it go down ("praise"), or the time is up ("done"): he says so
+    in his own words, and talk nearby doesn't cut him off. Awake for it, so his body language plays (during the
+    session he still doesn't answer what's said: _handle_heard)."""
+    global awake_until
+    awake_until = max(awake_until, time.time() + config.AWAKE_SECONDS)
+    await wake_up()
+    if event == "nag" and tracker is not None and not tracker.enabled:
+        # Turn to you first: a moment of face tracking, then off again so his body language can play.
+        await set_tracking(True, announce=False)
+        await asyncio.sleep(config.FOCUS_TURN_S)
+        await set_tracking(False, announce=False)
+    await converse(focus.note(event), interruptible=False)
+
+
+def focus_busy() -> bool:
+    """He's talking, thinking or dancing: no looks for focus mode now. Talk nearby doesn't count: he isn't answering
+    it during a session, and a long chat mustn't hide the phone from him."""
+    return thinking or speaking_now() or (dancer is not None and dancer.dancing)
+
+
 main_loop: asyncio.AbstractEventLoop | None = None
 ABILITIES = {
     "look": _sync(look),
     "track_face": _sync(lambda args: set_tracking(bool(args.get("on", True)))),
     "dance": _sync(lambda args: dance()),
+    "focus_mode": _sync(focus_ability),
     # the computer abilities (computer.py) are plain functions: no event loop, nothing sent to the robot
     **{name: (lambda fn: lambda args: (fn(args), None))(fn) for name, fn in computer.ACTIONS.items()},
 }
@@ -662,6 +709,7 @@ class SpeechTrack:
     speaker has been given, so a speaker that ran dry (the voice falling behind) doesn't count as still talking."""
 
     RATE = 32000
+    STEP = 1280                                # bytes per loudness reading (40 ms)
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
@@ -669,15 +717,26 @@ class SpeechTrack:
         self.made = 0                          # bytes of audio voiced so far
         self.given = 0                         # bytes handed to the speaker so far
         self.anchor = (0, float("inf"))        # (byte, time.time()) the audible position was last pinned at
+        self.levels: list[float] = []          # loudness (RMS) of each STEP voiced, for the dashboard's hearing strip
+        self._part = b""                       # voiced audio short of a whole STEP
 
     # the voice thread
     def begin(self, text: str) -> None:
         with self.lock:
             self.lines.append([text, self.made, None])
 
-    def voiced(self, n: int) -> None:
+    def voiced(self, chunk: bytes) -> None:
+        import numpy as np
         with self.lock:
-            self.made += n
+            self.made += len(chunk)
+            data = self._part + chunk
+            whole = len(data) - len(data) % self.STEP
+            self._part = data[whole:]
+        if whole:
+            a = np.frombuffer(data[:whole], dtype=np.int16).astype(np.float32) / 32768.0
+            rms = np.sqrt(np.mean(a.reshape(-1, self.STEP // 2) ** 2, axis=1))
+            with self.lock:
+                self.levels.extend(rms.tolist())
 
     def end(self) -> None:
         with self.lock:
@@ -703,11 +762,23 @@ class SpeechTrack:
                 self.anchor = (self.given, now)
             self.given = given
 
+    def level(self, window: float = 0.25) -> float:
+        """How loud his voice is right now, 0..1: the last `window` s of what's audible, against the loudness the
+        voice is held to (TTS_LEVEL), so a normal word sits mid-strip and pauses drop to nothing."""
+        with self.lock:
+            end = int(self._pos(time.time()) // self.STEP)
+            got = self.levels[max(0, end - round(window * self.RATE / self.STEP)):end]
+        if not got:
+            return 0.0
+        return min(1.0, math.sqrt(sum(x * x for x in got) / len(got)) / (2 * config.TTS_LEVEL))
+
     def snapshot(self) -> dict:
+        level = self.level()
         with self.lock:
             r = self.RATE
             return {"lines": [[t, s / r, None if e is None else e / r] for t, s, e in self.lines],
-                    "pos": round(self._pos(time.time()) / r, 3), "given": round(self.given / r, 3)}
+                    "pos": round(self._pos(time.time()) / r, 3), "given": round(self.given / r, 3),
+                    "level": round(level, 3)}
 
 
 speech_now: SpeechTrack | None = None   # the reply being spoken (for the dashboard), None when he's quiet
@@ -789,7 +860,7 @@ class SpokenReply:
                     if not self.pcm:
                         self.tl.mark("first audio")
                     self.pcm.append(chunk)
-                    self.track.voiced(len(chunk))
+                    self.track.voiced(chunk)
                     self.audio.put(chunk)
                 self.track.end()
                 self.audio.put(self.BREAK)
@@ -995,7 +1066,8 @@ def speaking_now() -> bool:
 async def gesture_seen(name: str) -> None:
     """A wave from perception, while he's asleep, wakes him (the only gesture that does anything)."""
     global awake_until
-    if not config.GESTURE_REACTIONS or name != "wave" or robot_socket is None or thinking or speaking_now():
+    if (not config.GESTURE_REACTIONS or name != "wave" or robot_socket is None or thinking or speaking_now()
+            or focus.active):   # a focus session: he only speaks up about the phone
         return
     if time.time() < awake_until:
         return   # awake already: nothing to do
@@ -1007,10 +1079,12 @@ async def gesture_seen(name: str) -> None:
     awake_until = time.time() + config.AWAKE_SECONDS
 
 
-async def converse(question: str, ended_at: float | None = None, heard_at: float | None = None) -> bool:
+async def converse(question: str, ended_at: float | None = None, heard_at: float | None = None,
+                   interruptible: bool = True) -> bool:
     """Ask the brain, show the face, and speak the answer as it forms.
     Returns False if the human started talking again before Rocky spoke
-    (the reply was dropped and the question is still open)."""
+    (the reply was dropped and the question is still open). Not
+    interruptible: focus mode's lines, which talk nearby doesn't cancel."""
     global awake_until
     computer.controller.new_turn(question)
     loop = asyncio.get_running_loop()
@@ -1045,7 +1119,7 @@ async def converse(question: str, ended_at: float | None = None, heard_at: float
     global thinking
     thinking = True
     try:
-        finished = await reply.play()
+        finished = await reply.play(interruptible)
     except Exception as e:  # a speaker hiccup shouldn't kill the server
         print(f"(could not speak: {e})")
         finished = True
@@ -1144,6 +1218,7 @@ def console_state() -> dict:
         "tuning": {k: getattr(config, k) for k in TUNABLE},
         "speech": speech_now.snapshot() if speech_now is not None else None,   # his words as he says them
         "computer": computer.controller.status(),
+        "focus": focus.status(),
     }
 
 
@@ -1292,6 +1367,18 @@ async def _console_command(action: str, payload: dict) -> dict:
         setattr(config, key, value)
         persist("voice", key, value)
         print(f"console: {key} = {value:g} (saved)")
+    elif action == "focus":
+        # the dashboard's Focus card: {"on": true, "minutes": 25} starts a session, {"on": false} ends it
+        if payload.get("on", True):
+            if not decisions.available():
+                raise ValueError("focus mode needs OPENAI_API_KEY in server/.env (then restart the server)")
+            if robot_socket is None:
+                raise ValueError("the robot isn't connected: focus mode watches through its camera")
+            await start_focus(_number(payload, "minutes", 1, 180), announce=True)
+        elif focus.active:
+            note = focus.note("stopped")
+            focus.stop()
+            asyncio.create_task(converse(note, interruptible=False))
     elif action == "settings_reload":
         await reload_settings()
     else:
@@ -1388,11 +1475,12 @@ async def head_loop() -> None:
 
 async def doze_loop() -> None:
     """When the awake clock runs out, he nods off on his own (sleepy face,
-    no announcement). Saying "hey Rocky" wakes him again."""
+    no announcement). Saying "hey Rocky" wakes him again. Not during a focus
+    session: his face stays up until it ends."""
     was_awake = False
     while True:
         await asyncio.sleep(1)
-        awake = time.time() < awake_until
+        awake = time.time() < awake_until or focus.active
         if was_awake and not awake:
             print(f"({config.ROBOT_NAME} dozed off — say \"hey {config.ROBOT_NAME}\" to wake him)")
             await fall_asleep()
@@ -1431,6 +1519,16 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
     global awake_until
     text, started_at, ended_at, heard_at = item
     woke, question = strip_wake_word(text)
+    if focus.active:
+        # A focus session: he answers nothing (talk to people, or to yourself), only "hey Rocky, stop focus".
+        if woke and any(p in normalize(question) for p in config.FOCUS_STOP_PHRASES):
+            print(f"{config.HUMAN_NAME}: {text}")
+            note = focus.note("stopped")
+            focus.stop()
+            await converse(note, interruptible=False)
+        else:
+            print(f"(focus mode, not answering: {text})")
+        return
     # Judge the follow-up window by when you STARTED talking, not by when
     # the transcript arrived — long sentences shouldn't time out.
     if not woke and started_at >= awake_until:
@@ -1522,7 +1620,8 @@ async def main() -> None:
     apply_settings(settings.load())
     loop = asyncio.get_running_loop()
     main_loop = loop
-    brain = RobotBrain(ABILITIES, extra_tools=lambda: computer.tools(computer.controller), quick=computer.QUICK)
+    brain = RobotBrain(ABILITIES, quick=computer.QUICK, extra_tools=lambda: (
+        computer.tools(computer.controller) + ([focus_mode.TOOL] if decisions.available() else [])))
     tracker = Tracker(eyes, lambda p, t, on: loop.call_soon_threadsafe(head_moves.put_nowait, (p, t, on)))
     body = Body(send_to_robot, tracker)
     dancer = Dancer(send_to_robot, tracker)
@@ -1537,6 +1636,9 @@ async def main() -> None:
                                  or time.time() < roam_moving_until or dancer.dancing)
     perception.enabled = config.PERCEPTION
     tracker.perception = perception   # its boxes go on the live view
+    focus.frame = eyes.latest
+    focus.busy = focus_busy
+    focus.react = focus_react
     perception.start()
     tracker.start()
     print("face tracking:", "on" if config.TRACKING else f"off — say \"{config.ROBOT_NAME}, track me\" or type `track on`")

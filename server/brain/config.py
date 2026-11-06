@@ -249,6 +249,25 @@ CAMERA_WORDS = [
 # works out a reply. Never while asleep, tracking, or while a look is taking its picture. Dashboard: Rocky card.
 BODY_LANGUAGE = True
 
+# Focus mode (focus.py): during a focus session he checks the camera picture every few seconds with OpenAI's
+# Decisions API (decisions.py; OPENAI_API_KEY in server/.env) and tells you off when you're on your phone. A frame
+# is ~640 tokens: a 25-minute session costs about 3 cents. Start it by voice ("help me focus for 25 minutes") or the
+# dashboard's Focus card.
+DECISIONS_MODEL = "gpt-6-luna"     # the only model the Decisions API runs (2026-11)
+DECISIONS_BASE_URL = "https://api.openai.com/v1"
+DECISIONS_TIMEOUT = 5.0            # s; it answers in under 1, and a late answer is about an old picture
+FOCUS_MINUTES = 25.0               # a session's length when none is asked for
+FOCUS_CHECK_EVERY = 3.0            # s between looks
+FOCUS_PHONE_PROB = 0.8             # a look counts as "on the phone" at this probability or more
+FOCUS_STREAK = 3                   # ...this many looks in a row (~8 s) before he says anything: a glance is fine
+FOCUS_PUT_DOWN_PROB = 0.3          # after he caught you: below this two looks running = put down (he approves)
+FOCUS_NAG_EVERY = 30.0             # s at least between two tellings-off, if you keep at it
+FOCUS_TURN_S = 1.2                 # s of face tracking to turn to you before he tells you off
+# During a session he answers nothing he hears, so you can talk to people; "hey Rocky, stop focus" (any of these
+# after his name) is the one thing that still works: it ends the session.
+FOCUS_STOP_PHRASES = ["stop focus", "end focus", "stop the focus", "end the focus", "cancel focus",
+                      "stop focusing", "focus off", "turn off focus"]
+
 # Face tracking: the head follows the biggest face in the picture.
 # Off until you ask ("Rocky, track me"); phrases below switch it without a
 # brain call, and Rocky can also switch it himself when asked in other words.

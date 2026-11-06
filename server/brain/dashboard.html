@@ -273,6 +273,7 @@
   input[type=text], input[type=search] { flex: 1; min-width: 120px; }
   input::placeholder, textarea::placeholder { color: var(--muted); }
   .hint { margin: 6px 0 0; font: 12px var(--body); color: var(--muted); }
+  .focusquiet strong { color: var(--ink); font-weight: 600; }
 
   /* switches and lamps instead of the browser's boxes */
   input[type=checkbox] { -webkit-appearance: none; appearance: none; flex: none; position: relative; width: 32px; height: 18px; margin: 0;
@@ -651,6 +652,19 @@
             <button type="button" class="astro" id="sleepbtn">Go to sleep</button>
           </div>
           <p class="hint">Asleep, his screen shows the clock and weather.</p>
+        </div>
+        <div class="card">
+          <h2 class="label"><span>Focus</span><span class="sonar-state" id="focusstate">—</span></h2>
+          <div class="row">
+            <label for="focusmin" class="visually-hidden">Session length</label>
+            <select id="focusmin">
+              <option value="15">15 minutes</option><option value="25" selected>25 minutes</option>
+              <option value="45">45 minutes</option><option value="60">60 minutes</option>
+            </select>
+            <button type="button" class="primary" id="focusbtn">Start focus</button>
+          </div>
+          <p class="hint" id="focusnote">He watches you and tells you off when you pick up your phone. Or say "<span data-robot-name>{name}</span>, help me focus for 25 minutes".</p>
+          <p class="hint focusquiet"><strong>During a session <span data-robot-name>{name}</span> won't answer anything you say</strong>, so you can talk to people or to yourself. He only speaks up about your phone. To end early: End session, or say "hey <span data-robot-name>{name}</span>, stop focus".</p>
         </div>
       </aside>
     </div>
@@ -1606,6 +1620,28 @@ const FaceKit = (() => {
   $("askbtn").onclick = () => { const x = $("saytext").value.trim(); if (x) { act("ask", { text: x }, "Asked " + NAME); $("saytext").value = ""; } };
   $("wakebtn").onclick = () => act("sleep", { on: false }, NAME + " is awake");
   $("sleepbtn").onclick = () => act("sleep", { on: true }, NAME + " is going to sleep");
+  $("focusbtn").onclick = () => status.focus?.active ? act("focus", { on: false }, "Focus session ended")
+    : act("focus", { on: true, minutes: +$("focusmin").value }, "Focus session started");
+
+  // ── focus mode ─────────────────────────────────────────────────────────
+  const mmss = s => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+  const focusHint = $("focusnote").innerHTML;
+  function renderFocus(f) {
+    const st = $("focusstate"), note = $("focusnote"), btn = $("focusbtn");
+    if (!f) return;
+    btn.disabled = !f.available;
+    btn.textContent = f.active ? "End session" : "Start focus";
+    btn.classList.toggle("primary", !f.active);
+    $("focusmin").disabled = f.active;
+    st.textContent = f.active ? mmss(f.left_s) + " left" : "off";
+    st.className = "sonar-state" + (f.active ? " hot" : "");
+    note.classList.toggle("warn", !f.available || !!f.error);
+    if (!f.available) { note.textContent = "Needs OPENAI_API_KEY in server/.env (then restart the server)."; return; }
+    if (f.error) { note.textContent = f.error; return; }
+    if (!f.active) { if (note.innerHTML !== focusHint) note.innerHTML = focusHint; return; }
+    const phone = f.phone == null ? "—" : Math.round(f.phone * 100) + "%";
+    note.textContent = `Phone ${phone} on the last look · picked up ${f.pickups}× · ${f.checks} looks`;
+  }
 
   // ── what he notices (perception) ───────────────────────────────────────
   function renderNotices(n) {
@@ -1640,7 +1676,8 @@ const FaceKit = (() => {
     for (let i = 0; i < n; i++) {
       const s = history[history.length - n + i], x = 10 + i * (bw + gap);
       if (!s) { ctx.fillStyle = "rgba(255,255,255,.06)"; ctx.beginPath(); ctx.roundRect(x, mid - 1, bw, 2, 1); ctx.fill(); continue; }
-      const [level, prob, speaking, voice] = s, amp = Math.min(1, Math.sqrt(level) * 3.2), bar = Math.max(2, amp * (h - 18));
+      const [level, prob, speaking, voice, out] = s;
+      const amp = speaking && out != null ? out : Math.min(1, Math.sqrt(level) * 3.2), bar = Math.max(2, amp * (h - 18));
       const heard = voice ?? prob > (status.tuning?.VAD_THRESHOLD ?? 0.5);
       const rgb = speaking ? "255,74,61" : heard ? "242,180,92" : "138,148,166";
       // newest bars brightest: the strip reads as a trail moving left
@@ -1677,6 +1714,7 @@ const FaceKit = (() => {
     const pc = s.computer?.last;
     if (pc && pcSeen !== undefined && pc[1] !== pcSeen) toast(`${NAME} on your computer: ${pc[0]}`);
     pcSeen = pc ? pc[1] : null;
+    renderFocus(s.focus);
     const linked = !!s.robot, fresh = s.frame_age_s != null && s.frame_age_s < 3;
     $("link").textContent = linked ? "on WiFi" : "not connected"; $("link").className = "v" + (linked ? " good" : " warn");
     $("fps").textContent = fresh ? s.fps + " fps" : "no signal"; $("fps").className = "v" + (fresh ? "" : " warn");
@@ -1714,11 +1752,14 @@ const FaceKit = (() => {
     $("trackbtn").classList.toggle("active", !!s.tracking_enabled); $("trackbtn").textContent = s.tracking_enabled ? "Stop following" : "Follow my face";
     takeWords(s);
     // each bar sums up the time since the last look: its loudest moment, and gold if any of it was a voice to him
-    history.push([s.level_recent ?? s.level ?? 0, s.speech_recent ?? s.speech_prob ?? 0, !!s.speaking, s.voice_recent]);
+    // (while he talks the mic is muted, so his bars are his own voice's loudness instead)
+    history.push([s.level_recent ?? s.level ?? 0, s.speech_recent ?? s.speech_prob ?? 0, !!s.speaking, s.voice_recent, s.speech?.level]);
     if (history.length > 60) history.shift();
     const hs = $("hearstate");
-    hs.textContent = s.speaking ? "speaking" : !s.listening ? "ears off" : s.hearing ? "hearing you" : "listening";
-    hs.className = "sonar-state" + (s.speaking ? " astro" : s.hearing ? " hot" : "");
+    const focusing = !!s.focus?.active;   // a focus session: he hears, but answers nothing
+    hs.textContent = s.speaking ? "speaking" : !s.listening ? "ears off" : focusing ? "focus · not answering"
+      : s.hearing ? "hearing you" : "listening";
+    hs.className = "sonar-state" + (s.speaking ? " astro" : s.hearing && !focusing ? " hot" : "");
     renderNotices(s.notices);
     if (liveTab()) drawWave();
   }

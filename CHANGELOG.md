@@ -3,6 +3,34 @@
 Each version of the robot is a git tag and a GitHub Release. `main` is the
 latest work. A video matches the tagged version it was made with.
 
+## v2.1 - 2026-11-06
+
+Software:
+
+- Focus mode: "Rocky, help me focus for 25 minutes", or the Focus card on
+  the dashboard. He watches you, and when you pick up your phone he turns to
+  you and tells you off, in character, more dramatically if you keep at it.
+  He approves when you put it down and tells you how it went at the end.
+  During a session he answers nothing he hears, so you can talk to people;
+  "hey Rocky, stop focus" ends it early. The phone check is OpenAI's
+  Decisions API on the camera frame every 3 seconds (an optional
+  `OPENAI_API_KEY`, about 3 cents a 25-minute session).
+- The dashboard's hearing strip shows Rocky's own voice rising and falling
+  while he talks (it was a flat red line).
+- A question about a part you're working with ("which way does this LED
+  go?") is answered from what he knows, without turning to look.
+
+Firmware 0.4.3 (optional: nothing in the brain needs it):
+
+- The robot tells the brain how it's been when it connects: why it last
+  restarted, its WiFi signal, how often WiFi and the link dropped and why,
+  and any freeze of its main loop. The brain prints it on the "robot
+  connected!" line, so a dropped connection explains itself.
+
+Updating from v2.0: pull, restart the brain, and add `OPENAI_API_KEY` to
+`server/.env` if you want focus mode. No new Python packages. Reflash only
+for the diagnostics.
+
 ## v2.0 - 2026-10-22
 
 Hardware:

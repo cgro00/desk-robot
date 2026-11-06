@@ -33,6 +33,8 @@ See [Make it your own](#make-it-your-own).
   your face (smiling, looking at him) and a wave.
 - Decide when you have finished talking, the way a person does, instead of
   waiting for a fixed pause.
+- Keep you off your phone during a focus session, and say something about
+  it, in character, when you slip.
 
 **How it is put together**
 
@@ -105,6 +107,8 @@ Nothing is billed while the robot is idle.
 - Optionally a **Fish Audio** key for the cloned voice. Without it Rocky
   speaks with your computer's built-in voice, which is fine for getting
   started.
+- Optionally an **OpenAI** key for [focus mode](#focus-mode), even if your
+  language model is elsewhere. It costs about 3 cents a 25-minute session.
 
 **Skills.** Basic through-hole soldering, and the patience to read
 [Wire it up](#wire-it-up) before powering anything on.
@@ -252,6 +256,7 @@ Open `server/.env` and fill in:
 - `ROBOT_TOKEN`: any random string. The robot will need the same one. Make
   one with `python3 -c "import secrets; print(secrets.token_hex(16))"`.
 - `FISH_AUDIO_API_KEY`: optional, for the cloned voice.
+- `OPENAI_API_KEY`: optional, for [focus mode](#focus-mode).
 
 Then start the dashboard, from the `server` folder:
 
@@ -287,7 +292,7 @@ To have the dashboard there whenever you log in, run
 <http://localhost:8766/> has five tabs, and only answers this computer:
 
 - **Live**: what Rocky sees and hears, the last exchange, and buttons for
-  his head, face, sleep, and words to say. **Start server**, **Restart** and
+  his head, face, sleep, words to say, and a focus session. **Start server**, **Restart** and
   **Stop** for the brain are in the header, on every tab. (If you started the
   brain yourself with `python -m brain.main`, the header shows it running but
   leaves Stop and Restart to that terminal.)
@@ -352,6 +357,7 @@ away from the computer.
 | "what do you see?" | He describes the current camera frame, and only what is actually in it. |
 | "track me" / "stop tracking" | His head follows your face, or stops. |
 | "Rocky, sleep" / "goodnight" | He says goodnight and stops listening until you say his name. His screen shows the sleep face for a few seconds, then the clock. |
+| "Rocky, help me focus for 25 minutes" | A [focus session](#focus-mode): he answers nothing until it ends, and only speaks up when you pick up your phone. "Hey Rocky, stop focus" ends it early. |
 
 He decides you are finished the way a person does. A small model listens to
 how your sentence ends; if you sound done he answers about a third of a
@@ -485,6 +491,47 @@ accounts):
    Computer says "Key found".
 
 Without a key he opens Spotify's search for you to pick from.
+
+### Focus mode
+
+Say **"Rocky, help me focus for 25 minutes"**, or pick a length on the
+dashboard's **Focus** card (Live tab) and press **Start focus**. For that
+long he keeps an eye on you, and when you pick up your phone he turns to you
+and tells you off. A glance at a notification is fine: he only reacts after
+about 8 seconds on it. Keep scrolling and he says it again every 30 seconds,
+more dramatically each time. Put it down and he approves, and when the time
+is up he tells you how it went. His words come from the language model in his
+own character, so every personality does it in its own way.
+
+**During a session he answers nothing he hears**, "hey Rocky" included, so
+you can talk to people around you or to yourself. The one exception is
+**"hey Rocky, stop focus"**, which ends it early. So does **End session** on
+the dashboard. His face stays up the whole time instead of dozing, and the
+Focus card shows the time left and what the last check saw.
+
+How he spots the phone: every 3 seconds the newest camera frame goes to
+OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions) with one
+yes-or-no question, "is this person using a phone?". Instead of writing an
+answer it sends back a probability, in under a second, and he reacts when
+that stays at 80% or more for three checks in a row. The question is in
+`server/brain/focus.py`, and the thresholds are the `FOCUS_` settings in
+`server/brain/config.py`.
+
+**OpenAI key** (separate from your language-model key, even if that's
+OpenAI too):
+
+1. Sign in at [platform.openai.com](https://platform.openai.com) and add a
+   payment method under **Billing**. There is no free tier for this API.
+   A few dollars of credit lasts a long time: a frame is about 640 tokens,
+   so a 25-minute session costs about 3 cents. A monthly budget limit on
+   the project is a good idea.
+2. Create a key under **API keys** and put it in `server/.env` as
+   `OPENAI_API_KEY`.
+3. Restart the server (**Restart** in the dashboard's header). The Focus
+   card's **Start focus** button works once the key is found.
+
+Without the key the Focus card says so, and he doesn't offer focus sessions
+by voice. The robot has to be connected, since he watches through its camera.
 
 ## Make it your own
 
@@ -694,7 +741,8 @@ what Rocky is told he can do. A different screen driver goes near the top of
   tools: `look` (move the head, take a picture) and `track_face`.
   `mouth.py` turns text into audio with Fish Audio and levels it for the
   small speaker. `tracker.py` follows faces with OpenCV. `perception.py`
-  notices faces and a wave. `eyes.py` serves
+  notices faces and a wave. `focus.py` runs focus sessions, asking OpenAI's
+  Decisions API about the camera frame through `decisions.py`. `eyes.py` serves
   the camera and the Live page. `settings.py` reads and writes
   `settings.json`. `main.py` ties it together.
 - **Launcher** (`server/launcher.py`): the dashboard on port 8766. It starts
@@ -734,7 +782,10 @@ cd server && python -m unittest tests/test_*.py
   Rocky". All he can do is move his head and spend a fraction of a cent,
   plus, if you switch on computer control, open the sites, apps, music and
   Shortcuts on your lists (no typing, clicking or buying). A Shortcut only
-  runs after he asks and the next thing said to him starts with a yes.
+  runs after he asks and the next thing said to him starts with a yes. With
+  an OpenAI key, anyone can also start a focus session, which sends camera
+  pictures to OpenAI until it ends (at most 3 hours, about 25 cents) or
+  someone stops it.
 - **What leaves your computer:** each question sends the transcript, the recent
   conversation, your name from `HUMAN_NAME`, a camera picture and the
   face note (while he's awake; turn "A picture with every question"
@@ -747,6 +798,10 @@ cd server && python -m unittest tests/test_*.py
   Open-Meteo for the weather at the location you set (rounded to about
   1 km); the dashboard's town search sends what you type to Open-Meteo.
   With a Spotify key, "play ..." sends the search words to Spotify.
+  **During a focus session**, a camera picture goes to OpenAI every 3
+  seconds, and only then. It is the same picture you see on the Live tab,
+  with you in it. OpenAI's API data policy covers what it keeps and for how
+  long (see its data controls; eligible accounts can get Zero Data Retention).
 - **Camera and microphone:** while the brain is connected the robot streams
   both to it, also while he sleeps on the clock (the camera at 5 frames a
   second, so a wave can wake him; the mic, so his name can). They stop when
