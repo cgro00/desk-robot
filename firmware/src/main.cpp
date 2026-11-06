@@ -68,8 +68,12 @@ enum LoopPart : uint8_t { LP_LINK, LP_MIC, LP_SNAPSHOT, LP_JPEG, LP_FACE, LP_SER
 const char* const LOOP_PART_NAMES[LP_COUNT] = {"link", "mic", "snapshot", "jpeg", "face", "servo", "whole pass"};
 uint32_t loopWorstUs[LP_COUNT] = {};
 uint32_t loopPasses = 0, loopSlowPasses = 0;   // passes, and passes over 40 ms (the face misses a frame)
+uint32_t passPartUs[LP_COUNT] = {};             // this pass, part by part (a pass over 1 s is reported)
+uint32_t stallWorstMs = 0;                     // the longest pass since the brain last connected, and its slowest part
+uint8_t stallWorstPart = LP_WHOLE;
 inline void loopTime(LoopPart p, uint32_t t0) {
   uint32_t dt = micros() - t0;
+  passPartUs[p] = dt;
   if (dt > loopWorstUs[p]) loopWorstUs[p] = dt;
 }
 
@@ -586,7 +590,7 @@ static void quietServoLines() {
 // A constructor runs before setup(), a few ms after the bootloader hands over.
 static struct QuietServosAtStart { QuietServosAtStart() { quietServoLines(); } } quietServosAtStart;
 
-static const char* resetReason() {
+const char* resetReason() {   // also in the hello (link.cpp)
   switch (esp_reset_reason()) {
     case ESP_RST_POWERON: return "power on";
     case ESP_RST_BROWNOUT: return "BROWNOUT (the supply dipped: servos + camera on a weak USB port?)";
@@ -646,6 +650,14 @@ void setup() {
 
 #if HAVE_BRAIN
   brainLink.onAudio([](const uint8_t* pcm, size_t len) { speaker.feed(pcm, len); });
+  brainLink.onHello([](JsonDocument& doc) {
+    // How the last connection went from here: the longest loop() pass and where it went, the longest face gap.
+    doc["stall_ms"] = stallWorstMs;
+    if (stallWorstMs) doc["stall_part"] = LOOP_PART_NAMES[stallWorstPart];
+    doc["face_gap_ms"] = faceGapWorstMs;
+    stallWorstMs = 0;
+    faceGapWorstMs = 0;
+  });
   brainLink.onSettings([](const char* json) { handleCommand(String("settings ") + json); });
   brainLink.onFace([](const char* json) {
     // {"type":"face","save":true,"pack":{...}}: save = false while the dashboard previews an edit
@@ -706,7 +718,22 @@ void loop() {
     if (loopPasses++) {
       if (us - lastPassUs > loopWorstUs[LP_WHOLE]) loopWorstUs[LP_WHOLE] = us - lastPassUs;
       if (us - lastPassUs > 40000) ++loopSlowPasses;
+      // A pass over a second freezes everything that waits on loop() (the brain hears nothing, its heartbeat goes
+      // unanswered): say where the time went, here and in the next hello.
+      uint32_t passMs = (us - lastPassUs) / 1000;
+      if (passMs > 1000) {
+        uint8_t worst = LP_WHOLE;
+        for (uint8_t i = 0; i < LP_WHOLE; ++i)
+          if (worst == LP_WHOLE || passPartUs[i] > passPartUs[worst]) worst = i;
+        Serial.printf("loop: one pass took %u ms, most in %s (%u ms)\n", static_cast<unsigned>(passMs),
+                      LOOP_PART_NAMES[worst], static_cast<unsigned>(passPartUs[worst] / 1000));
+        if (passMs > stallWorstMs) {
+          stallWorstMs = passMs;
+          stallWorstPart = worst;
+        }
+      }
     }
+    for (uint32_t& p : passPartUs) p = 0;
     lastPassUs = us;
     static uint32_t lastPassMs = now;
     if (speaker.speaking() && now - lastPassMs > slowestLoopMs) slowestLoopMs = now - lastPassMs;

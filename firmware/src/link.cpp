@@ -5,6 +5,11 @@
 
 #include "config.h"   // FW_VERSION
 
+const char* resetReason();   // main.cpp
+
+// Written by the WiFi event task, read in update(): the reason the router (or the chip) gave for the last drop.
+static volatile uint8_t lastDropReason = 0;
+
 void Link::begin(const char* ssid, const char* pass, const char* host,
                  uint16_t port, const char* token, CommandHandler onCommand,
                  StateHandler onState) {
@@ -20,6 +25,8 @@ void Link::begin(const char* ssid, const char* pass, const char* host,
   // the first one it hears, which with a mesh or a second router can be a far one: a slow, gappy link until it drops.
   WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
   WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+  WiFi.onEvent([](WiFiEvent_t, WiFiEventInfo_t info) { lastDropReason = info.wifi_sta_disconnected.reason; },
+               ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.begin(ssid_, pass_);
   Serial.printf("wifi: joining \"%s\"...\n", ssid_);
 
@@ -35,12 +42,15 @@ void Link::update(uint32_t nowMs) {
   bool wifiUp = WiFi.status() == WL_CONNECTED;
   if (wifiUp && !wifiReported_) {
     Serial.printf("wifi: connected, ip %s\n", WiFi.localIP().toString().c_str());
+    if (lastDropAtMs_) lastDownMs_ = nowMs - lastDropAtMs_;
     wifiReported_ = true;
     lowTxPower_ = false;           // a fresh join starts at full power; the check below turns it down again
     lastTxCheckMs_ = nowMs - 5000;
   } else if (!wifiUp && wifiReported_) {
-    Serial.println(F("wifi: lost, retrying"));
+    Serial.printf("wifi: lost (reason %u), retrying\n", static_cast<unsigned>(lastDropReason));
     wifiReported_ = false;
+    ++wifiDrops_;
+    lastDropAtMs_ = nowMs ? nowMs : 1;
   }
   if (!wifiUp) {
     // The WiFi stack rejoins by itself after most drops, but not after every failed join: after one reboot it sat
@@ -61,7 +71,7 @@ void Link::update(uint32_t nowMs) {
   // biggest heat source, and full power is only needed far from the router: 11 dBm while the router comes in loud,
   // full power again once it fades. RSSI is how loud the router is to us, which our own power doesn't change, so
   // this can't feed back on itself; the gap between the two thresholds stops it flapping.
-  if (nowMs - lastTxCheckMs_ >= 5000) {
+  if (WIFI_SAVE_TX_POWER && nowMs - lastTxCheckMs_ >= 5000) {
     lastTxCheckMs_ = nowMs;
     int rssi = WiFi.RSSI();
     bool low = lowTxPower_ ? rssi > -62 : rssi >= -50;
@@ -118,6 +128,18 @@ void Link::onEvent(WStype_t type, uint8_t* payload, size_t length) {
       doc["who"] = "desk-robot";
       doc["fw"] = FW_VERSION;
       doc["token"] = token_;  // the brain drops connections without it
+      doc["boot"] = resetReason();
+      doc["up_s"] = millis() / 1000;
+      doc["rssi"] = WiFi.RSSI();
+      doc["tx_low"] = lowTxPower_;
+      doc["wifi_drops"] = wifiDrops_;
+      doc["link_drops"] = linkDrops_;
+      if (wifiDrops_) {
+        doc["drop_reason"] = lastDropReason;
+        doc["drop_ago_s"] = (millis() - lastDropAtMs_) / 1000;
+        doc["down_s"] = lastDownMs_ / 1000.0f;
+      }
+      if (onHello_) onHello_(doc);
       String out;
       serializeJson(doc, out);
       sendJson(out);
@@ -127,6 +149,7 @@ void Link::onEvent(WStype_t type, uint8_t* payload, size_t length) {
     case WStype_DISCONNECTED:
       if (connected_) {
         Serial.println(F("brain: disconnected, will retry"));
+        ++linkDrops_;
         if (onState_) onState_(false);
       }
       connected_ = false;

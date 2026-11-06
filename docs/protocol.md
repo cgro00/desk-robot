@@ -10,7 +10,17 @@ frames start with one type byte: `0x01` = mic audio, `0x02` = camera JPEG,
 ## Robot → server
 
 ```json
-{"type": "hello", "who": "desk-robot", "fw": "0.4.0", "token": "..."}  // must be the first message; token = ROBOT_TOKEN
+{"type": "hello", "who": "desk-robot", "fw": "0.4.3", "token": "...",   // must be the first message; token = ROBOT_TOKEN
+ "boot": "power on", "up_s": 3600, "rssi": -58, "tx_low": true,
+ "wifi_drops": 1, "link_drops": 2, "drop_reason": 200, "drop_ago_s": 900, "down_s": 4.2,
+ "stall_ms": 0, "face_gap_ms": 0}
+                                  // 0.4.3+: how the robot has been, for the brain's "robot connected!" log line:
+                                  // why it last restarted, seconds up, WiFi signal (dBm) and whether transmit power
+                                  // is turned down, WiFi and brain-link drops since boot (the last WiFi drop's
+                                  // reason code, 802.11 or ESP-IDF's 200+, how long ago, how long it was down;
+                                  // only after a drop), the longest main-loop freeze since the last connection
+                                  // ("stall_part" names where, when there was one) and the longest gap between
+                                  // face frames, both in ms. Older firmware sends the first four.
 {"type": "state", "pan": 12.5, "emotion": "neutral"}
 {"type": "temp", "c": 52.0}       // chip temperature, sent every ~10 s
 {"type": "speak_done", "dry_ms": 0, "wait_ms": 210, "next_ms": 200, "rssi": -58}

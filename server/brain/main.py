@@ -144,6 +144,44 @@ def pick_mic_source() -> None:
             print("listening through the robot mic" if source == "robot" else f"listening through \"{ears.device_name}\"")
 
 
+# Why the robot's WiFi last dropped (the reason code its WiFi stack reported: 802.11's, or ESP-IDF's 200+).
+WIFI_DROP_REASONS = {
+    2: "the router's login timed out", 3: "the router dropped it", 4: "the router dropped it for going quiet",
+    8: "it left the network", 15: "WiFi password handshake timed out", 200: "lost the router's signal",
+    201: "router not found", 202: "WiFi login failed", 203: "router refused it", 204: "WiFi handshake timed out",
+    205: "connection failed",
+}
+
+
+def robot_health(hello: dict) -> str:
+    """Firmware 0.4.3+ says in its hello how it's been: why it last restarted, its signal, and how often WiFi and
+    the link have dropped since. Shown on the "robot connected!" line, so a drop explains itself."""
+    num = lambda k: hello.get(k) if isinstance(hello.get(k), (int, float)) and not isinstance(hello.get(k), bool) else None
+    if num("up_s") is None:
+        return ""
+    up = int(num("up_s"))
+    parts = [f"up {up // 3600}h{up % 3600 // 60:02d}m" if up >= 3600 else f"up {up // 60}m{up % 60:02d}s"]
+    if isinstance(hello.get("boot"), str):
+        parts.append(f"last restart: {hello['boot'][:80]}")
+    if num("rssi") is not None:
+        parts.append(f"WiFi {int(num('rssi'))} dBm" + (", low transmit power" if hello.get("tx_low") is True else ""))
+    drops, links = num("wifi_drops") or 0, num("link_drops") or 0
+    if drops:
+        code = int(num("drop_reason") or 0)
+        why = WIFI_DROP_REASONS.get(code, "reason")
+        down = f", down {num('down_s'):.0f} s" if num("down_s") else ""
+        ago = f", {int(num('drop_ago_s'))} s ago" if num("drop_ago_s") is not None else ""
+        parts.append(f"WiFi dropped {int(drops)}x since then (last: {why} {code}{down}{ago})")
+    if links:
+        parts.append(f"link dropped {int(links)}x")
+    if (num("stall_ms") or 0) > 1000:   # 0.4.3+: its main loop froze (the brain heard nothing meanwhile)
+        part = str(hello.get("stall_part", "?"))[:20]
+        parts.append(f"its loop FROZE for {num('stall_ms') / 1000:.1f} s, in {part}")
+    if (num("face_gap_ms") or 0) > 1000:
+        parts.append(f"face froze for {num('face_gap_ms') / 1000:.1f} s")
+    return "; " + "; ".join(parts)
+
+
 async def handle_robot(websocket: websockets.ServerConnection) -> None:
     global robot_socket, roam_moving_until, robot_peer, robot_heard_at, _greeting
     peer = websocket.remote_address[0] if websocket.remote_address else "?"
@@ -194,7 +232,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
         asyncio.create_task(old.close(1012))
     robot_socket = websocket
     robot_peer, robot_heard_at = peer, time.time()
-    print(f"robot connected! (fw {hello.get('fw', '?')}, {peer})")
+    print(f"robot connected! (fw {hello.get('fw', '?')}, {peer}{robot_health(hello)})")
     pick_mic_source()
     await update_robot_mic()
     await send_to_robot({"type": "stream", "on": True, "fps": config.CAMERA_FPS, "size": config.CAMERA_STREAM_SIZE})
@@ -256,7 +294,8 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
         # new connection can arrive before the old one is noticed as dead.
         if robot_socket is websocket:
             robot_socket = None
-            print("robot disconnected")
+            quiet = time.time() - robot_heard_at
+            print("robot disconnected" + (f" (nothing from it for {quiet:.0f} s first)" if quiet >= 3 else ""))
             pick_mic_source()
 
 

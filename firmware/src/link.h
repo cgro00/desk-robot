@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <WebSocketsClient.h>
+#include <ArduinoJson.h>
 #include <functional>
 
 // Link: WiFi + a WebSocket to the brain server.
@@ -28,6 +29,8 @@ class Link {
   void onSettings(SettingsHandler h) { onSettings_ = std::move(h); }
   // The brain's `face` message (a face pack), passed on as the raw JSON.
   void onFace(SettingsHandler h) { onFace_ = std::move(h); }
+  // Adds fields to the hello sent on every (re)connect.
+  void onHello(std::function<void(JsonDocument&)> h) { onHello_ = std::move(h); }
 
   // Call every loop().
   void update(uint32_t nowMs);
@@ -50,6 +53,7 @@ class Link {
   AudioHandler onAudio_;
   SettingsHandler onSettings_;
   SettingsHandler onFace_;
+  std::function<void(JsonDocument&)> onHello_;
   const char* ssid_ = nullptr;
   const char* pass_ = nullptr;
   const char* token_ = "";
@@ -58,4 +62,10 @@ class Link {
   uint32_t wifiDownSinceMs_ = 0;   // when WiFi was last seen down (0 = it is up)
   uint32_t lastTxCheckMs_ = 0;     // transmit power: last look at the signal
   bool lowTxPower_ = false;        // turned down because the router is close
+  // For the hello, so the brain's log says why the last connection ended: WiFi drops since boot (and the last one's
+  // reason code, 802.11 or ESP-IDF's 200+, and how long it was down) and brain connections lost since boot.
+  uint16_t wifiDrops_ = 0;
+  uint32_t lastDropAtMs_ = 0;
+  uint32_t lastDownMs_ = 0;
+  uint16_t linkDrops_ = 0;
 };

@@ -2,7 +2,11 @@
 
 // desk-robot firmware for the V2 robot: printed pan/tilt neck (38/30 geared pan), 2.42" SSD1309 face, camera on
 // its side in the head, Dayton CE32A-8 speaker. V1 (Adafruit bracket, 1.3" SH1106) is the v1.0 tag.
-#define FW_VERSION "0.4.1"
+#define FW_VERSION "0.4.3"
+
+// Turn the WiFi transmit power down to 11 dBm while the router is loud (less heat). Full power made no difference to
+// the 2026-10-23 slow link (that was the power supply), so it stays on.
+#define WIFI_SAVE_TX_POWER 1
 
 // ─── Pin map (XIAO ESP32S3 Sense) ────────────────────────────────────────────
 // Silkscreen label → GPIO number. The camera and PDM mic on the Sense
