@@ -39,7 +39,8 @@ _SENTENCE_END = re.compile(r"(?<=[!?])\s+|(?<=[^.]\.)(?<!\bMr\.)(?<!\bMrs\.)(?<!
 # The model thinking out loud about its instructions instead of talking to its human ("The question is 'what is
 # this?' and the detector note says a thumbs down, but the question is about seeing. I should look to get a
 # picture."). The prompt says not to; a sentence like this is dropped before it's spoken, as a backstop.
-_REASONING = re.compile(r"\b(?:detectors?|the note|note says|the question is|question is about|the user|"
+_REASONING = re.compile(r"\b(?:detectors?|the note|note says|the question is|question is about|is an? (?:\w+ )?question about|"
+                        r"knowledge question|the user|"
                         r"my instructions|the instructions say|system prompt|"
                         r"i should (?:look|use|call|check|get|describe|answer))\b", re.IGNORECASE)
 
@@ -67,8 +68,10 @@ TOOLS = [
             "name": "look",
             "description": (
                 "Move your head. Use it whenever you are asked to turn, move or point your "
-                "head, to look left/right/down/up/around, or need to see something outside "
-                "the current picture. Always call it when asked, even if you think "
+                "head, to look left/right/down/up/around, or to look at, check or find something. "
+                "Never use it on your own to answer a question: when your human mentions a thing "
+                "(\"this capacitor\", \"which way does this LED go\") and asks how it works or how to "
+                "use it, answer from what you know without looking. Always call it when asked, even if you think "
                 "you are already there: the result tells you where your head really "
                 "is and whether it is at a limit. With see true you get a fresh camera image "
                 "afterwards; describe only what that image shows. With see false there is "

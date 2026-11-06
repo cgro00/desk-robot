@@ -13,6 +13,8 @@ LEAKED = [
     "I should look to get a picture before describing anything.",
     "The note says one person very close.",
     "The user wants a sad face.",
+    "This is a question about a physical part and polarity, which needs me to see the capacitor.",
+    "This is a knowledge question about a part, so I answer from what I know without looking.",
 ]
 ROCKY = [
     "Question, Sam: is puzzle cube?", "Orange and white faces, black grid lines.", "Answer: eight legs.",
