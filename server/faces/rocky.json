@@ -1,0 +1,167 @@
+{
+  "name": "Default",
+  "author": "desk-robot",
+  "description": "The default face: soft rounded eyes with pupils that look around.",
+  "gap": 16,
+  "y": 0,
+  "cyclops": false,
+  "outline": false,
+  "glint": true,
+  "mouth": "talk",
+  "asleep": {
+    "w": 30,
+    "h": 3,
+    "rt": 1,
+    "rb": 1
+  },
+  "emotions": {
+    "neutral": {
+      "w": 34,
+      "h": 34,
+      "rt": 12,
+      "rb": 12
+    },
+    "happy": {
+      "w": 36,
+      "h": 36,
+      "rt": 12,
+      "rb": 12,
+      "cheek": 16,
+      "fx": [
+        "blush"
+      ]
+    },
+    "sad": {
+      "w": 32,
+      "h": 26,
+      "rt": 10,
+      "rb": 10,
+      "st": -9,
+      "lid": 4,
+      "fx": [
+        "tear"
+      ]
+    },
+    "angry": {
+      "w": 34,
+      "h": 24,
+      "rt": 8,
+      "rb": 8,
+      "st": 10,
+      "fx": [
+        "steam",
+        "shake"
+      ]
+    },
+    "surprised": {
+      "w": 38,
+      "h": 44,
+      "rt": 19,
+      "rb": 19,
+      "fx": [
+        "pop"
+      ],
+      "pop": 0.3
+    },
+    "sleepy": {
+      "w": 34,
+      "h": 26,
+      "rt": 10,
+      "rb": 10,
+      "lid": 14
+    },
+    "thinking": {
+      "w": 30,
+      "h": 30,
+      "rt": 11,
+      "rb": 11,
+      "lid": 5,
+      "fx": [
+        "dots"
+      ],
+      "gaze": [
+        7,
+        -5
+      ]
+    },
+    "curious": {
+      "w": 30,
+      "h": 30,
+      "rt": 11,
+      "rb": 11,
+      "right": {
+        "w": 38,
+        "h": 40,
+        "rt": 15,
+        "rb": 15,
+        "dy": -2
+      },
+      "gaze": [
+        -5,
+        -3
+      ],
+      "pop": 0.15
+    },
+    "skeptical": {
+      "w": 34,
+      "h": 38,
+      "rt": 13,
+      "rb": 12,
+      "st": -3,
+      "right": {
+        "w": 34,
+        "h": 34,
+        "rt": 12,
+        "rb": 12,
+        "lid": 17
+      },
+      "gaze": [
+        4,
+        0
+      ]
+    },
+    "excited": {
+      "w": 38,
+      "h": 40,
+      "rt": 16,
+      "rb": 16,
+      "cheek": 10,
+      "fx": [
+        "sparkle",
+        "bounce"
+      ],
+      "pop": 0.25
+    },
+    "love": {
+      "w": 36,
+      "h": 34,
+      "rt": 14,
+      "rb": 14,
+      "cheek": 12,
+      "fx": [
+        "hearts",
+        "blush"
+      ],
+      "pop": 0.2
+    },
+    "confused": {
+      "w": 32,
+      "h": 36,
+      "rt": 13,
+      "rb": 12,
+      "st": -5,
+      "right": {
+        "w": 28,
+        "h": 24,
+        "rt": 10,
+        "rb": 10,
+        "st": 4,
+        "dy": 4
+      },
+      "fx": [
+        "question",
+        "wobble"
+      ]
+    }
+  }
+}

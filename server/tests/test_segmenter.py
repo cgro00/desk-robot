@@ -40,6 +40,19 @@ class SegmenterSensitivityTests(unittest.TestCase):
                 turns.append(turn)
         return turns
 
+    def test_recent_sums_up_the_last_moment(self):
+        self.assertEqual(self.segmenter.recent(0.25), (0.0, 0.0, False))
+        self.feed(0.1, 3)
+        level, prob, voice = self.segmenter.recent(0.25)
+        self.assertAlmostEqual(prob, 0.1)
+        self.assertFalse(voice)
+        self.feed(0.45)                     # a voice starts...
+        self.feed(0.3)                      # ...and a softer syllable still counts once it has
+        self.feed(0.05)
+        level, prob, voice = self.segmenter.recent(0.25)
+        self.assertAlmostEqual(prob, 0.45)  # the highest score in the window, not the latest
+        self.assertTrue(voice)
+
     def test_soft_syllables_continue_a_turn_but_do_not_start_one(self):
         self.assertEqual(self.feed(0.3, 20), [])
         self.assertFalse(self.segmenter.speaking)

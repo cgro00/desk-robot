@@ -1,0 +1,2475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{name} · dashboard</title>
+<meta name="referrer" content="no-referrer">
+<style>
+  :root {
+    --void: #06080d;
+    --panel: #0d121b;
+    --panel-2: #111826;
+    --well: #090c13;           /* recessed: inputs, screens, the sound strip */
+    --line: #1d2533;
+    --line-strong: #2c3648;
+    --ink: #ece6d9;
+    --muted: #8a94a6;
+    --astro: #ff4a3d;          /* astrophage: attention, and Rocky's voice while he speaks */
+    --astro-glow: rgba(255, 74, 61, .35);
+    --amber: #f2b45c;          /* warm hull light: Rocky's side of things */
+    --amber-dim: rgba(242, 180, 92, .16);
+    --amber-glow: rgba(242, 180, 92, .38);
+    --ok: #8fd19e;
+    --glass: rgba(13, 18, 27, .6);       /* --panel, see-through: panels over the sky */
+    --glass-edge: rgba(70, 84, 108, .55);
+    /* System fonts only: the page makes no requests beyond this computer. */
+    --display: "Avenir Next", "Helvetica Neue", sans-serif;
+    --body: "Helvetica Neue", Arial, sans-serif;
+    --mono: "SF Mono", Menlo, monospace;
+    /* the hull plate shape: top-left and bottom-right corners cut off */
+    --c: 14px;
+    --plate: polygon(var(--c) 0, 100% 0, 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, 0 100%, 0 var(--c));
+    --plate-in: polygon(calc(var(--c) - .4px) 0, 100% 0, 100% calc(100% - var(--c) + .4px), calc(100% - var(--c) + .4px) 100%, 0 100%, 0 calc(var(--c) - .4px));
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { color-scheme: dark; }
+  body {
+    margin: 0; min-height: 100vh; color: var(--ink); background: var(--void);
+    font: 14px/1.5 var(--body); accent-color: var(--amber);
+  }
+  /* the animated sky (the first script draws it), behind everything */
+  #sky { position: fixed; inset: 0; z-index: -2; width: 100%; height: 100%; pointer-events: none; }
+  /* a faint deck grid, fading out below the header */
+  body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1;
+    background: linear-gradient(rgba(242,180,92,.045) 1px, transparent 1px) 0 0 / 48px 48px,
+                linear-gradient(90deg, rgba(242,180,92,.045) 1px, transparent 1px) 0 0 / 48px 48px;
+    mask-image: linear-gradient(to bottom, #000, transparent 55vh); -webkit-mask-image: linear-gradient(to bottom, #000, transparent 55vh); }
+  a { color: var(--amber); }
+  code { font: 12px var(--mono); color: var(--ink); }
+  :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+  .visually-hidden { position: absolute; clip-path: inset(50%); overflow: hidden; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; white-space: nowrap; }
+
+  .console { max-width: 1260px; margin: 0 auto; padding: 22px 24px 56px; }
+
+  /* ── header: Rocky's face, his vitals, the server ───────────────────── */
+  .bridge { display: flex; align-items: center; justify-content: space-between; gap: 18px 30px; flex-wrap: wrap; padding: 4px 0 22px; }
+  .ident { display: flex; align-items: center; gap: 22px; }
+  .side { display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
+  .side .server { order: -1; }
+  .bezel { position: relative; flex: none; padding: 7px; background: var(--well); border: 1px solid rgba(242,180,92,.45);
+           border-radius: 14px; box-shadow: 0 0 0 4px rgba(242,180,92,.06), 0 0 28px rgba(242,180,92,.18), inset 0 0 18px rgba(0,0,0,.8);
+           transition: border-color .4s, box-shadow .4s; }
+  .bezel canvas { display: block; width: 192px; height: 96px; image-rendering: pixelated; border-radius: 6px;
+                  animation: poweron .9s cubic-bezier(.2,.8,.2,1) both; }
+  .bezel::after { content: ""; position: absolute; inset: 7px; border-radius: 6px; pointer-events: none;
+                  background: repeating-linear-gradient(0deg, rgba(0,0,0,.28) 0 1px, transparent 1px 3px),
+                              radial-gradient(120% 90% at 30% 20%, rgba(255,255,255,.07), transparent 60%); }
+  .bezel.speaking { border-color: var(--astro); box-shadow: 0 0 0 4px rgba(255,74,61,.1), 0 0 34px var(--astro-glow), inset 0 0 18px rgba(0,0,0,.8); }
+  .bezel.dozing { border-color: var(--line-strong); box-shadow: inset 0 0 18px rgba(0,0,0,.8); }
+  @keyframes poweron {
+    0% { transform: scale(1, .02); filter: brightness(4); opacity: 0; }
+    35% { transform: scale(1, .02); filter: brightness(4); opacity: 1; }
+    70% { transform: scale(1, 1.04); filter: brightness(1.6); }
+    100% { transform: none; filter: none; }
+  }
+  .eyebrow { font: 10px var(--display); letter-spacing: .28em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 2px 0 2px; font: 600 34px/1.05 var(--display); letter-spacing: .26em; text-transform: uppercase;
+       text-shadow: 0 0 22px rgba(242,180,92,.28); }
+  .mood { font: 13px var(--mono); color: var(--amber); }
+  .mood .off { color: var(--muted); }
+
+  .vitals { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; border: 1px solid var(--line);
+            background: var(--glass); clip-path: var(--plate); --c: 10px;
+            -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+  .vitals li { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 84px; padding: 10px 16px 10px 28px; }
+  .vitals li + li { border-left: 1px solid var(--line); }
+  .vitals li::before { content: ""; position: absolute; left: 13px; top: 15px; width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); }
+  .vitals li:has(.v.good)::before, .vitals li:has(.v.on)::before { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+  .vitals li:has(.v.warn)::before { background: var(--astro); box-shadow: 0 0 8px var(--astro); }
+  .k { font: 10px var(--display); letter-spacing: .22em; text-transform: uppercase; color: var(--muted); }
+  .vitals .v { font: 500 14px var(--mono); color: var(--ink); white-space: nowrap; }
+  .v.warn { color: var(--astro); }
+  .v.good { color: var(--amber); }
+
+  .server { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; font: 500 12px var(--mono); padding: 7px 13px; border-radius: 999px;
+          border: 1px solid var(--line-strong); color: var(--muted); background: rgba(9,12,19,.6); }
+  .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .pill.on { color: var(--ink); border-color: rgba(242,180,92,.5); }
+  .pill.on::before { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+  .pill.busy::before { background: var(--amber); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+
+  /* ── tabs: a mode selector with a sliding light ─────────────────────── */
+  .tabs { position: relative; display: flex; gap: 2px; width: max-content; max-width: 100%; margin: 0 0 22px; padding: 4px;
+          background: rgba(9,12,19,.7); border: 1px solid var(--line-strong); border-radius: 999px; overflow-x: auto; scrollbar-width: none;
+          -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+  .tabs [role=tab] { position: relative; z-index: 1; font: 600 11px var(--display); letter-spacing: .22em; text-transform: uppercase; color: var(--muted);
+                     background: none; border-radius: 999px; padding: 9px 20px; clip-path: none; transition: color .25s; }
+  .tabs [role=tab]::before { display: none; }
+  .tabs [role=tab]:hover { color: var(--ink); }
+  .tabs [role=tab][aria-selected=true] { color: var(--void); }
+  .tabglow { position: absolute; top: 4px; bottom: 4px; left: 0; width: 0; border-radius: 999px; background: var(--amber);
+             box-shadow: 0 0 18px var(--amber-glow), inset 0 1px 0 rgba(255,255,255,.35);
+             transition: translate .35s cubic-bezier(.3,1.3,.5,1), width .35s cubic-bezier(.3,1.3,.5,1); }
+  [role=tabpanel][hidden] { display: none; }
+
+  /* ── layout ─────────────────────────────────────────────────────────── */
+  .deck { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(330px, 1fr); gap: 20px; align-items: start; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
+  @media (max-width: 900px) { .deck, .grid2 { grid-template-columns: 1fr; } }
+
+  .label { margin: 0 0 14px; font: 600 10px var(--display); letter-spacing: .28em; text-transform: uppercase; color: var(--ink);
+           display: flex; justify-content: space-between; align-items: baseline; gap: 6px 12px; flex-wrap: wrap; }
+  .label > span:first-child::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 10px; vertical-align: 1px;
+                                      background: var(--amber); transform: rotate(45deg); box-shadow: 0 0 8px var(--amber-glow); }
+  .label .sub { font: 11px var(--mono); letter-spacing: 0; text-transform: none; color: var(--muted); }
+  .label .sub::before { display: none; }
+  h3.label { color: var(--muted); }
+
+  /* a hull plate: the 1px edge is the plate's own colour showing round an inset panel, so it follows the cut corners */
+  .card { position: relative; isolation: isolate; background: var(--glass-edge); clip-path: var(--plate); padding: 18px 20px;
+          -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3); }
+  .card::before { content: ""; position: absolute; inset: 1px; z-index: -1; clip-path: var(--plate-in);
+                  background: linear-gradient(180deg, rgba(242,180,92,.05), transparent 90px), var(--glass); }
+  .card::after { content: ""; position: absolute; top: 0; left: calc(var(--c) + 6px); width: 46px; height: 2px; background: var(--amber); opacity: .75; }
+  .stack > .card + .card { margin-top: 16px; }
+
+  /* ── stopped notice ─────────────────────────────────────────────────── */
+  .stopped { text-align: center; padding: 44px 24px 52px; }
+  .stopped canvas { display: block; width: 256px; height: 128px; margin: 0 auto 22px; image-rendering: pixelated; border-radius: 8px;
+                    border: 1px solid var(--line-strong); box-shadow: inset 0 0 18px rgba(0,0,0,.8); }
+  .stopped h2 { font: 600 15px var(--display); letter-spacing: .2em; text-transform: uppercase; margin: 0 0 10px; }
+  .stopped p { color: var(--muted); margin: 0 auto 20px; max-width: 46ch; }
+
+  /* ── viewport: the camera as a targeting display ────────────────────── */
+  .viewport { position: relative; aspect-ratio: 4 / 3; background: #000; border: 1px solid var(--line-strong); border-radius: 4px; overflow: hidden;
+              transition: box-shadow .35s, border-color .35s; }
+  .viewport.speaking { border-color: var(--astro); box-shadow: 0 0 0 1px var(--astro), 0 0 46px var(--astro-glow); }
+  .viewport img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .viewport::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+                     background: repeating-linear-gradient(0deg, rgba(255,255,255,.035) 0 1px, transparent 1px 3px),
+                                 radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.45)); mix-blend-mode: normal; }
+  .corner { position: absolute; width: 22px; height: 22px; border: 2px solid var(--amber); pointer-events: none; opacity: .9;
+            filter: drop-shadow(0 0 4px var(--amber-glow)); }
+  .corner.tl { top: 10px; left: 10px; border-right: 0; border-bottom: 0; }
+  .corner.tr { top: 10px; right: 10px; border-left: 0; border-bottom: 0; }
+  .corner.bl { bottom: 10px; left: 10px; border-right: 0; border-top: 0; }
+  .corner.br { bottom: 10px; right: 10px; border-left: 0; border-top: 0; }
+  /* the reticle: dashed and idle, closing in amber when a face is locked */
+  .reticle { position: absolute; left: 50%; top: 50%; width: 76px; height: 76px; translate: -50% -50%; pointer-events: none;
+             border: 1px dashed rgba(236,230,217,.35); border-radius: 50%; transition: width .4s, height .4s, border-color .4s; }
+  .reticle::before, .reticle::after { content: ""; position: absolute; background: rgba(236,230,217,.45); transition: background .4s; }
+  .reticle::before { left: 50%; top: -10px; bottom: -10px; width: 1px; translate: -.5px 0;
+                     mask: linear-gradient(#000 0 10px, transparent 10px calc(100% - 10px), #000 0); -webkit-mask: linear-gradient(#000 0 10px, transparent 10px calc(100% - 10px), #000 0); }
+  .reticle::after { top: 50%; left: -10px; right: -10px; height: 1px; translate: 0 -.5px;
+                    mask: linear-gradient(90deg, #000 0 10px, transparent 10px calc(100% - 10px), #000 0); -webkit-mask: linear-gradient(90deg, #000 0 10px, transparent 10px calc(100% - 10px), #000 0); }
+  .viewport.locked .reticle { width: 54px; height: 54px; border: 2px solid var(--amber); box-shadow: 0 0 14px var(--amber-glow); animation: lock 1.6s ease-in-out infinite; }
+  .viewport.locked .reticle::before, .viewport.locked .reticle::after { background: var(--amber); }
+  @keyframes lock { 50% { box-shadow: 0 0 2px var(--amber-glow); } }
+  .viewport.dark .reticle { display: none; }
+  .hudtop { position: absolute; top: 12px; left: 44px; right: 44px; display: flex; justify-content: space-between; gap: 10px; pointer-events: none;
+            font: 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--amber); }
+  .hudtop > span { background: rgba(6,8,13,.55); padding: 2px 8px; border-radius: 3px; }
+  .live::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: var(--amber);
+                  box-shadow: 0 0 8px var(--amber); vertical-align: 0; animation: blink 1.6s infinite; }
+  .viewport.dark .hudtop { display: none; }
+  /* pan along the bottom edge, tilt up the right edge */
+  .gauge { position: absolute; pointer-events: none; --tick: rgba(236,230,217,.4); }
+  .gauge.pan { left: 25%; right: 25%; bottom: 12px; height: 12px;
+               background: repeating-linear-gradient(90deg, var(--tick) 0 1px, transparent 1px 10%) bottom / 100% 5px no-repeat,
+                           linear-gradient(var(--tick), var(--tick)) center bottom / 1px 12px no-repeat; }
+  .gauge.tilt { top: 25%; bottom: 25%; right: 12px; width: 12px;
+                background: repeating-linear-gradient(180deg, var(--tick) 0 1px, transparent 1px 10%) right / 5px 100% no-repeat,
+                            linear-gradient(var(--tick), var(--tick)) right center / 12px 1px no-repeat; }
+  .gauge i { position: absolute; width: 0; height: 0; border: 6px solid transparent; filter: drop-shadow(0 0 4px var(--amber)); transition: left .2s, top .2s; }
+  .gauge.pan i { left: 50%; bottom: 7px; translate: -6px 0; border-top: 8px solid var(--amber); border-bottom: 0; }
+  .gauge.tilt i { top: 50%; right: 7px; translate: 0 -6px; border-left: 8px solid var(--amber); border-right: 0; }
+  .viewport.dark .gauge { display: none; }
+  .readout { position: absolute; left: 14px; bottom: 32px; display: flex; gap: 14px; font: 12px var(--mono); color: var(--amber);
+             background: rgba(6,8,13,.55); padding: 4px 8px; border-radius: 3px; }
+  .readout .off { color: var(--muted); }
+  .nocam { position: absolute; inset: 0; display: none; flex-direction: column; gap: 14px; align-items: center; justify-content: center; text-align: center; padding: 24px;
+           color: var(--muted); font: 13px var(--mono);
+           background: repeating-radial-gradient(circle at 50% 50%, transparent 0 38px, rgba(242,180,92,.06) 38px 39px), var(--void); }
+  .nocam::before { content: ""; width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(242,180,92,.25); border-top-color: var(--amber);
+                   animation: spin 1.4s linear infinite; }
+  @keyframes spin { to { rotate: 1turn; } }
+  .viewport.dark .nocam { display: flex; }
+  .viewport.dark img { visibility: hidden; }
+
+  /* ── hearing ────────────────────────────────────────────────────────── */
+  .sonar { position: relative; height: 96px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden;
+           background: linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px) 0 0 / 100% 16px, var(--well); }
+  .sonar canvas { display: block; width: 100%; height: 100%; }
+  .sonar-state { font: 600 10px var(--display); letter-spacing: .22em; text-transform: uppercase; color: var(--muted); }
+  .sonar-state.hot { color: var(--amber); text-shadow: 0 0 10px var(--amber-glow); }
+  .sonar-state.astro { color: var(--astro); text-shadow: 0 0 10px var(--astro-glow); }
+  .line { display: grid; grid-template-columns: 70px 1fr; gap: 10px; margin: 12px 0 0; align-items: baseline; }
+  .line .who { font: 10px var(--display); letter-spacing: .2em; text-transform: uppercase; color: var(--muted); padding-top: 3px; }
+  .line.said .who { color: var(--amber); }
+  .line .text { color: var(--ink); min-height: 1.4em; }
+  .line .text:empty::before { content: "—"; color: var(--muted); }
+  /* the conversation as transmissions: yours plain, his lit */
+  .chat .line { margin: 10px 0 0; padding: 9px 12px; border-left: 2px solid var(--line-strong); background: rgba(255,255,255,.02); }
+  .chat .line.said { border-left-color: var(--amber); background: rgba(242,180,92,.07); transition: border-color .3s, background .3s; }
+  .chat .line.said.talking { border-left-color: var(--astro); background: rgba(255,74,61,.07); }   /* red while he speaks */
+  .line .text .now { color: var(--amber); text-shadow: 0 0 10px var(--amber-glow); }
+  .line .text.typing::after { content: ""; display: inline-block; width: .5em; height: 1.05em; margin-left: 4px; vertical-align: -.18em;
+                            background: currentColor; opacity: .7; animation: blink 1s steps(1) infinite; }
+
+  /* ── controls ───────────────────────────────────────────────────────── */
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .field { display: grid; grid-template-columns: 52px 1fr 54px; gap: 12px; align-items: center; margin: 10px 0; }
+  .field .v { font: 13px var(--mono); color: var(--amber); text-align: right; }
+
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; background: transparent; margin: 0; --p: 50%; }
+  input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px;
+    background: linear-gradient(90deg, var(--amber) var(--p), var(--line-strong) var(--p)); box-shadow: 0 0 10px rgba(242,180,92,.12); }
+  input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line-strong); }
+  input[type=range]::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--amber); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px; border-radius: 50%; background: var(--void);
+    border: 3px solid var(--amber); box-shadow: 0 0 0 4px rgba(242,180,92,.12), 0 0 12px var(--amber-glow); cursor: grab; transition: box-shadow .15s, scale .15s; }
+  input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--void); border: 3px solid var(--amber); cursor: grab; }
+  input[type=range]:hover::-webkit-slider-thumb { box-shadow: 0 0 0 6px rgba(242,180,92,.18), 0 0 16px var(--amber-glow); }
+  input[type=range]:active::-webkit-slider-thumb { scale: 1.15; cursor: grabbing; }
+
+  /* buttons are small hull plates too */
+  button { --bd: var(--line-strong); --bg: var(--panel-2); --fg: var(--ink); --c: 7px;
+           position: relative; isolation: isolate; font: 600 12px var(--body); letter-spacing: .04em; color: var(--fg);
+           background: var(--bd); border: 0; clip-path: var(--plate); padding: 8px 14px; cursor: pointer;
+           transition: color .15s, background .15s, translate .1s; }
+  button::before { content: ""; position: absolute; inset: 1px; z-index: -1; clip-path: var(--plate-in); background: var(--bg); transition: background .15s; }
+  button:hover { --bd: var(--amber); }
+  button:hover::before { background: linear-gradient(0deg, var(--amber-dim), transparent 70%), var(--bg); }
+  button:active { translate: 0 1px; }
+  button.active, button.primary { --bd: var(--amber); --bg: var(--amber); --fg: var(--void); }
+  button.active:hover::before, button.primary:hover::before { background: #f6c477; }
+  button.astro:hover { --bd: var(--astro); --fg: var(--astro); }
+  button.astro:hover::before { background: linear-gradient(0deg, rgba(255,74,61,.14), transparent 70%), var(--bg); }
+  button:disabled { opacity: .45; cursor: default; translate: none; }
+  button:disabled:hover { --bd: var(--line-strong); }
+  button:focus-visible { outline: none; --bd: var(--ink); }
+
+  /* the face picker: each emotion as a little screen */
+  .faces { display: grid; grid-template-columns: repeat(auto-fill, minmax(94px, 1fr)); gap: 8px; }
+  .faces button { --bg: var(--well); display: grid; gap: 6px; min-width: 0; padding: 7px 7px 6px; text-transform: capitalize;
+                  font: 600 10px var(--display); letter-spacing: .12em; color: var(--muted); }
+  .faces button canvas { display: block; width: 100%; aspect-ratio: 2 / 1; image-rendering: pixelated; border-radius: 2px; opacity: .78; transition: opacity .2s; }
+  .faces button:hover canvas, .faces button:focus-visible canvas { opacity: 1; }
+  .faces button.active { --bg: var(--well); --fg: var(--amber); }
+  .faces button.active::before { background: linear-gradient(0deg, var(--amber-dim), transparent 80%), var(--well); }
+  .faces button.active canvas { opacity: 1; }
+  .faces.plain button { padding: 8px 6px; font: 600 12px var(--body); letter-spacing: .04em; color: var(--ink); }
+  .faces.plain button.active { --bg: var(--amber); --fg: var(--void); }
+
+  input[type=text], input[type=search], input[type=time], select {
+    font: 14px var(--body); color: var(--ink); background: var(--well); border: 1px solid var(--line-strong); border-radius: 3px; padding: 8px 10px;
+    transition: border-color .15s, box-shadow .15s; }
+  input[type=text]:focus, input[type=search]:focus, input[type=time]:focus, select:focus, textarea:focus {
+    outline: none; border-color: var(--amber); box-shadow: 0 0 0 3px rgba(242,180,92,.14), 0 0 14px rgba(242,180,92,.12); }
+  input[type=text], input[type=search] { flex: 1; min-width: 120px; }
+  input::placeholder, textarea::placeholder { color: var(--muted); }
+  .hint { margin: 6px 0 0; font: 12px var(--body); color: var(--muted); }
+  .focusquiet strong { color: var(--ink); font-weight: 600; }
+
+  /* switches and lamps instead of the browser's boxes */
+  input[type=checkbox] { -webkit-appearance: none; appearance: none; flex: none; position: relative; width: 32px; height: 18px; margin: 0;
+    border-radius: 9px; background: var(--well); border: 1px solid var(--line-strong); cursor: pointer; transition: background .2s, border-color .2s; }
+  input[type=checkbox]::before { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--muted); transition: translate .2s cubic-bezier(.3,1.4,.5,1), background .2s, box-shadow .2s; }
+  input[type=checkbox]:checked { background: rgba(242,180,92,.22); border-color: var(--amber); }
+  input[type=checkbox]:checked::before { translate: 14px 0; background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+  input[type=radio] { -webkit-appearance: none; appearance: none; flex: none; width: 16px; height: 16px; margin: 0; border-radius: 50%;
+    border: 1px solid var(--line-strong); background: var(--well); cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+  input[type=radio]:checked { border-color: var(--amber); background: radial-gradient(circle, var(--amber) 0 3.5px, transparent 4.5px), var(--well);
+    box-shadow: 0 0 10px var(--amber-glow); }
+  input[type=checkbox]:focus-visible, input[type=radio]:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+  /* ── settings ───────────────────────────────────────────────────────── */
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  /* legends float so they sit inside the box, not on its border */
+  fieldset > legend { float: left; width: 100%; padding: 0; }
+  fieldset > legend + * { clear: both; }
+  .set { display: grid; gap: 6px; padding: 12px 0; }
+  .set ~ .set { border-top: 1px dashed var(--line); }
+  .set > .k, .set > label.k, .set > legend.k { padding: 0; margin-bottom: 2px; }
+  .choices { display: flex; gap: 8px; flex-wrap: wrap; }
+  .choices label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 12px 6px 9px; border: 1px solid var(--line);
+                   border-radius: 999px; background: var(--well); transition: border-color .15s, background .15s; }
+  .choices label:hover { border-color: var(--line-strong); }
+  .choices label:has(:checked) { border-color: rgba(242,180,92,.6); background: var(--amber-dim); }
+  .check { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; margin: 2px 0; }
+  .slide { display: grid; grid-template-columns: 1fr 64px; gap: 12px; align-items: center; }
+  .slide output { font: 13px var(--mono); color: var(--amber); text-align: right; }
+  .times { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .badge { font: 10px var(--display); letter-spacing: .16em; text-transform: uppercase; color: var(--amber); border: 1px solid rgba(242,180,92,.5);
+           border-radius: 3px; padding: 1px 6px; margin-left: 6px; vertical-align: 1px; }
+  .saved { font: 11px var(--mono); color: var(--muted); letter-spacing: 0; text-transform: none; transition: color .3s; }
+  .saved.ok { color: var(--ok); }
+  .saved.ok::before { content: "✓ "; }
+  .results { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+  .results button { width: 100%; text-align: left; font-weight: 400; }
+  .here { font: 13px var(--mono); color: var(--amber); }
+  details.adv { margin-top: 18px; }
+  details.adv > summary { cursor: pointer; font: 600 10px var(--display); letter-spacing: .28em; text-transform: uppercase; color: var(--muted); padding: 6px 0;
+                          list-style: none; display: flex; align-items: center; gap: 10px; }
+  details.adv > summary::-webkit-details-marker { display: none; }
+  details.adv > summary::before { content: ""; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+                                  rotate: -45deg; transition: rotate .2s; }
+  details.adv[open] > summary::before { rotate: 45deg; }
+  details.adv > summary:hover { color: var(--ink); }
+  .notice { margin: 0 0 16px; padding: 10px 14px; border: 1px solid rgba(242,180,92,.45); border-left-width: 3px; border-radius: 3px; background: var(--amber-dim); }
+  .notice[hidden] { display: none; }
+
+  /* ── faces ──────────────────────────────────────────────────────────── */
+  canvas.oled { display: block; width: 100%; aspect-ratio: 2 / 1; image-rendering: pixelated; background: #0a0d14; border-radius: 3px; }
+  .packs { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .packcard, .facecard { --bg: var(--well); display: grid; gap: 6px; padding: 9px; text-align: left; }
+  .packcard[aria-pressed=true], .facecard[aria-pressed=true] { --bd: var(--amber); }
+  .packcard[aria-pressed=true]::before, .facecard[aria-pressed=true]::before { background: linear-gradient(0deg, var(--amber-dim), transparent 70%), var(--well); }
+  .packcard .pname { font: 600 13px var(--body); }
+  .packcard .ptags { font: 11px var(--mono); color: var(--muted); }
+  .packcard .ptags.on { color: var(--amber); }
+  .facecard span { font: 10px var(--display); letter-spacing: .18em; text-transform: uppercase; color: var(--muted); }
+  .facecard[aria-pressed=true] span { color: var(--amber); }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 10px; }
+  .facedeck { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); gap: 18px; align-items: start; margin-top: 18px; }
+  @media (max-width: 900px) { .facedeck { grid-template-columns: 1fr; } }
+  /* the big preview stays in view while the sliders below it scroll */
+  .pinned { position: sticky; top: 0; z-index: 1; background: #0f1520; margin: -17px -19px 0; padding: 17px 19px 12px;
+            border-bottom: 1px solid var(--line); clip-path: polygon(calc(var(--c) - 1px) 0, 100% 0, 100% 100%, 0 100%, 0 calc(var(--c) - 1px)); }
+  .pinned canvas.oled { border: 1px solid var(--line-strong); box-shadow: 0 0 24px rgba(242,180,92,.1), inset 0 0 18px rgba(0,0,0,.8); }
+  .fxboxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px 12px; }
+  .fxboxes label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .linkish { color: var(--amber); cursor: pointer; text-decoration: underline; }
+  .linkish:focus-within { outline: 2px solid var(--amber); outline-offset: 2px; }
+  textarea { font: 14px var(--body); color: var(--ink); background: var(--well); border: 1px solid var(--line-strong); border-radius: 3px;
+             padding: 8px 10px; width: 100%; resize: vertical; }
+
+  /* ── personalities ──────────────────────────────────────────────────── */
+  .charform { margin-top: 6px; }
+  .charform .grid2 { gap: 8px 28px; }
+  .charform .lines { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .charform .lines label { display: grid; gap: 4px; font: 12px var(--body); color: var(--muted); }
+  .hint.warn { color: var(--astro); }
+
+  /* ── log ────────────────────────────────────────────────────────────── */
+  .log { position: relative; height: min(62vh, 640px); overflow: auto; margin: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 4px;
+         background: repeating-linear-gradient(0deg, rgba(255,255,255,.015) 0 1px, transparent 1px 3px), #05070b;
+         font: 12px/1.6 var(--mono); color: #cfd6e2; white-space: pre-wrap; overflow-wrap: anywhere; box-shadow: inset 0 0 30px rgba(0,0,0,.6); }
+  .log .mark { color: var(--amber); text-shadow: 0 0 8px var(--amber-glow); }
+  .log .me { color: var(--muted); }
+  .log .err { color: var(--astro); }
+  .cmd { display: flex; gap: 10px; margin-top: 12px; align-items: center; }
+  .cmd::before { content: ">"; font: 600 15px var(--mono); color: var(--amber); }
+  .cmd input { font-family: var(--mono); }
+
+  /* ── toast (popover="manual": stays up until the timer hides it) ──────── */
+  .toast { position: fixed; inset: auto auto 22px 50%; translate: -50% 8px; margin: 0; background: var(--panel-2); border: 1px solid var(--line-strong);
+           border-left: 3px solid var(--amber); color: var(--ink); box-shadow: 0 10px 40px rgba(0,0,0,.6), 0 0 24px rgba(242,180,92,.12);
+           font: 13px var(--mono); padding: 9px 16px; border-radius: 3px; opacity: 0;
+           transition: opacity .2s, translate .25s, display .2s allow-discrete, overlay .2s allow-discrete; }
+  .toast:popover-open, .toast.show { opacity: 1; translate: -50% 0; }
+  @starting-style { .toast:popover-open { opacity: 0; translate: -50% 8px; } }
+  .toast:not([popover]) { pointer-events: none; }
+  .toast.err { border-color: var(--astro); color: var(--astro); }
+
+  @media (max-width: 640px) {
+    .console { padding: 16px 16px 44px; }
+    .ident { gap: 14px; }
+    .bezel { padding: 5px; border-radius: 11px; }
+    .bezel canvas { width: 128px; height: 64px; }
+    .bezel::after { inset: 5px; }
+    h1 { font-size: 24px; }
+    .vitals { width: 100%; }
+    .vitals li { flex: 1 1 33%; min-width: 0; padding: 8px 10px 8px 24px; }
+    .vitals li::before { left: 10px; top: 13px; }
+    .vitals li:nth-child(4) { border-left: 0; }
+    .vitals li:nth-child(n+4) { border-top: 1px solid var(--line); }
+    .tabs [role=tab] { padding: 9px 13px; letter-spacing: .16em; }
+    .hudtop { left: 12px; right: 12px; top: 40px; }
+    .reticle { width: 56px; height: 56px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<canvas id="sky" aria-hidden="true"></canvas>
+<script>
+// The sky behind the page: a spiral galaxy of a few thousand stars turning slowly, twinkling stars drifting past at
+// three depths, and now and then a shooting star. Drawn here, no images. Still with "reduce motion", paused when hidden.
+(() => {
+  const canvas = document.getElementById("sky"), ctx = canvas.getContext("2d");
+  const still = matchMedia("(prefers-reduced-motion: reduce)");
+  const TURN_S = 240;            // one turn of the galaxy, seconds
+  const TILT = -0.32, SQUASH = 0.5;   // seen from above at an angle (on a tall screen it stands upright: TILT + 90°)
+  const gauss = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  // colours: [r, g, b]; amber and astrophage red are the page's own
+  const WARM = [255, 214, 160], AMBER = [242, 180, 92], WHITE = [236, 230, 217], BLUE = [190, 205, 255], PINK = [255, 110, 100];
+
+  // the galaxy, in its own plane: radius 0..1, angle in radians
+  const galaxy = [];
+  for (let i = 0; i < 900; i++) {   // the bulge
+    const r = Math.abs(gauss()) * 0.11;
+    galaxy.push({ r, a: Math.random() * 6.283, size: Math.random() < 0.15 ? 2 : 1.3, c: Math.random() < 0.5 ? WARM : AMBER,
+                  base: 0.35 + Math.random() * 0.5, tw: 0.5 + Math.random() * 2, ph: Math.random() * 6.283 });
+  }
+  for (let i = 0; i < 3400; i++) {  // two arms, wound as a spiral, scattered more towards the middle
+    const arm = i % 2, t = Math.pow(Math.random(), 0.75), r = 0.06 + t * 0.94 + gauss() * 0.025;
+    const a = arm * Math.PI + r * 5.2 + gauss() * (0.38 - r * 0.18);
+    const knot = Math.random() < 0.045 && r > 0.25;
+    const c = knot ? PINK : Math.random() < 0.12 ? AMBER : Math.random() < 0.5 ? BLUE : WHITE;
+    galaxy.push({ r, a, size: knot ? 2.4 : Math.random() < 0.08 ? 1.8 : 1.2, c, base: (knot ? 0.75 : 0.2 + Math.random() * 0.55) * (1 - r * 0.45),
+                  tw: 0.4 + Math.random() * 2.2, ph: Math.random() * 6.283 });
+  }
+  for (let i = 0; i < 700; i++) {   // a faint haze of stars between the arms
+    const r = Math.pow(Math.random(), 0.6);
+    galaxy.push({ r, a: Math.random() * 6.283, size: 1, c: WHITE, base: 0.08 + Math.random() * 0.18, tw: 1, ph: Math.random() * 6.283 });
+  }
+  // soft light along the arms (drawn with a blurred sprite): what makes it read as a galaxy, not dust
+  const haze = [];
+  for (let i = 0; i < 520; i++) {
+    const arm = i % 2, r = 0.08 + Math.pow(Math.random(), 0.9) * 0.9;
+    const a = arm * Math.PI + r * 5.2 + gauss() * 0.22;
+    const knot = Math.random() < 0.12 && r > 0.25;
+    haze.push({ r, a, c: knot ? PINK : r < 0.25 ? AMBER : Math.random() < 0.6 ? BLUE : WHITE,
+                size: knot ? 0.02 + Math.random() * 0.02 : 0.04 + Math.random() * 0.07, base: knot ? 0.32 : 0.12 + Math.random() * 0.1 });
+  }
+  const sprites = new Map();
+  function sprite(c) {   // a white-hot centre fading out, in colour c
+    if (!sprites.has(c)) {
+      const k = document.createElement("canvas"); k.width = k.height = 64;
+      const x = k.getContext("2d"), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+      g.addColorStop(0, `rgba(${c[0]},${c[1]},${c[2]},1)`); g.addColorStop(0.35, `rgba(${c[0]},${c[1]},${c[2]},.35)`); g.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
+      x.fillStyle = g; x.fillRect(0, 0, 64, 64); sprites.set(c, k);
+    }
+    return sprites.get(c);
+  }
+  // the near sky, in screen fractions, at three depths (deeper = slower and fainter)
+  const field = [];   // enough for a big screen; a smaller one draws the first fieldCount, so the density stays the same
+  for (let i = 0; i < 900; i++) {
+    const depth = i % 3;
+    field.push({ x: Math.random(), y: Math.random(), depth, size: depth === 2 ? 1.6 : 1,
+                 c: Math.random() < 0.15 ? AMBER : Math.random() < 0.3 ? BLUE : WHITE,
+                 base: [0.25, 0.45, 0.75][depth] * (0.5 + Math.random() * 0.5), tw: 0.3 + Math.random() * 1.5, ph: Math.random() * 6.283 });
+  }
+  const DRIFT = [2, 4, 8];   // px per second, by depth
+  let shooting = null, nextShot = 6, W = 0, H = 0, dpr = 1, fieldCount = 0;
+
+  function size() {
+    dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    W = innerWidth; H = innerHeight;
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    fieldCount = Math.min(field.length, Math.round(W * H / 5000));
+  }
+  for (const s of [...galaxy, ...field]) s.css = `rgb(${s.c[0]},${s.c[1]},${s.c[2]})`;
+
+  function draw(t) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    // centred, its long axis along the screen's long side: as wide as fits, never taller than the short side allows
+    const tall = H > W, long = tall ? H : W, short = tall ? W : H;
+    const cx = W / 2, cy = H / 2, R = Math.min(long * 0.48, short / 1.1), tilt = TILT + (tall ? Math.PI / 2 : 0);
+    const k = Math.min(1.6, Math.max(0.8, R / 650));   // star size, so a big screen isn't a sprinkle of specks
+    const cosT = Math.cos(tilt), sinT = Math.sin(tilt), spin = t / TURN_S * 6.283;
+    ctx.globalCompositeOperation = "lighter";
+
+    // the disc's glow, then the core
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(tilt); ctx.scale(1, SQUASH);
+    let g = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
+    g.addColorStop(0, "rgba(242,180,92,.22)"); g.addColorStop(0.3, "rgba(160,150,200,.10)"); g.addColorStop(0.7, "rgba(120,130,190,.04)"); g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R, 0, 6.283); ctx.fill();
+    g = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 0.2);
+    g.addColorStop(0, "rgba(255,232,195,.9)"); g.addColorStop(0.25, "rgba(255,200,130,.4)"); g.addColorStop(0.6, "rgba(242,180,92,.12)"); g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R * 0.2, 0, 6.283); ctx.fill();
+    ctx.restore();
+
+    for (const h of haze) {
+      const a = h.a + spin, x = Math.cos(a) * h.r, y = Math.sin(a) * h.r * SQUASH;
+      const px = cx + R * (x * cosT - y * sinT), py = cy + R * (x * sinT + y * cosT), d = h.size * R;
+      if (px < -d || py < -d || px > W + d || py > H + d) continue;
+      ctx.globalAlpha = h.base; ctx.drawImage(sprite(h.c), px - d / 2, py - d / 2, d, d);
+    }
+    ctx.globalAlpha = 1;
+    for (const s of galaxy) {
+      const a = s.a + spin, x = Math.cos(a) * s.r, y = Math.sin(a) * s.r * SQUASH;
+      const px = cx + R * (x * cosT - y * sinT), py = cy + R * (x * sinT + y * cosT);
+      if (px < -4 || py < -4 || px > W + 4 || py > H + 4) continue;
+      ctx.globalAlpha = Math.min(1, s.base * 1.5 * (0.65 + 0.35 * Math.sin(t * s.tw + s.ph)));
+      ctx.fillStyle = s.css; ctx.fillRect(px, py, s.size * k, s.size * k);
+    }
+    for (let i = 0; i < fieldCount; i++) {
+      const s = field[i], x = ((s.x * W - t * DRIFT[s.depth]) % W + W) % W, y = s.y * H;
+      const a = s.base * (0.45 + 0.55 * Math.abs(Math.sin(t * s.tw + s.ph)));
+      ctx.globalAlpha = a; ctx.fillStyle = s.css; ctx.fillRect(x, y, s.size, s.size);
+      if (s.depth === 2 && a > 0.55) {   // the nearest stars flare into a little cross
+        ctx.globalAlpha = (a - 0.55) * 0.9;
+        ctx.fillRect(x - 2, y + 0.3, 5.6, 1); ctx.fillRect(x + 0.3, y - 2, 1, 5.6);
+      }
+    }
+    ctx.globalAlpha = 1;
+    if (shooting) {
+      const k = (t - shooting.t0) / shooting.dur;
+      if (k >= 1) shooting = null;
+      else {
+        const hx = shooting.x + shooting.dx * k, hy = shooting.y + shooting.dy * k, fade = Math.sin(k * Math.PI);
+        const tail = ctx.createLinearGradient(hx, hy, hx - shooting.dx * 0.25, hy - shooting.dy * 0.25);
+        tail.addColorStop(0, `rgba(255,236,200,${0.9 * fade})`); tail.addColorStop(1, "rgba(255,236,200,0)");
+        ctx.strokeStyle = tail; ctx.lineWidth = 1.4; ctx.beginPath();
+        ctx.moveTo(hx, hy); ctx.lineTo(hx - shooting.dx * 0.25, hy - shooting.dy * 0.25); ctx.stroke();
+      }
+    } else if (t > nextShot && !still.matches) {
+      const left = Math.random() < 0.5;
+      shooting = { t0: t, dur: 0.9 + Math.random() * 0.5, x: W * (left ? 0.1 : 0.5) + Math.random() * W * 0.4, y: Math.random() * H * 0.35,
+                   dx: (left ? 1 : -1) * W * (0.25 + Math.random() * 0.15), dy: H * (0.12 + Math.random() * 0.12) };
+      nextShot = t + 15 + Math.random() * 15;
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  // ~30 frames a second is plenty for something this slow
+  let last = 0, start = performance.now();
+  function loop(now) {
+    requestAnimationFrame(loop);
+    if (document.hidden || still.matches || now - last < 33) return;
+    last = now; draw((now - start) / 1000);
+  }
+  size(); draw(0);
+  addEventListener("resize", () => { size(); draw((performance.now() - start) / 1000); });
+  still.addEventListener?.("change", () => draw((performance.now() - start) / 1000));
+  requestAnimationFrame(loop);
+})();
+</script>
+<div class="console">
+  <header class="bridge">
+    <div class="ident">
+      <div class="bezel dozing" id="bezel"><canvas id="avatar" width="128" height="64" role="img" aria-label="the robot's face right now"></canvas></div>
+      <div>
+        <div class="eyebrow">desk unit · <span id="clock">--:--:--</span> local</div>
+        <h1><span data-robot-name>{name}</span></h1>
+        <div class="mood" id="mood"><span class="off">—</span></div>
+      </div>
+    </div>
+    <div class="side">
+    <ul class="vitals" aria-label="status">
+      <li><span class="k">Robot</span><span class="v" id="link">—</span></li>
+      <li><span class="k">State</span><span class="v" id="state">—</span></li>
+      <li><span class="k">Camera</span><span class="v" id="fps">—</span></li>
+      <li><span class="k">Hull</span><span class="v" id="temp">—</span></li>
+      <li><span class="k">Ears</span><span class="v" id="mic">—</span></li>
+    </ul>
+    <div class="server" id="serverbox" hidden>
+      <span class="pill" id="serverpill" role="status">server —</span>
+      <button type="button" class="primary" id="startbtn">Start server</button>
+      <button type="button" id="restartbtn">Restart</button>
+      <button type="button" class="astro" id="stopbtn">Stop</button>
+    </div>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="dashboard">
+    <span class="tabglow" id="tabglow" aria-hidden="true"></span>
+    <button type="button" role="tab" id="t-live" aria-controls="p-live" aria-selected="true">Live</button>
+    <button type="button" role="tab" id="t-settings" aria-controls="p-settings" aria-selected="false" tabindex="-1">Settings</button>
+    <button type="button" role="tab" id="t-chars" aria-controls="p-chars" aria-selected="false" tabindex="-1">Personalities</button>
+    <button type="button" role="tab" id="t-faces" aria-controls="p-faces" aria-selected="false" tabindex="-1">Faces</button>
+    <button type="button" role="tab" id="t-log" aria-controls="p-log" aria-selected="false" tabindex="-1">Log</button>
+  </nav>
+
+  <!-- ══ LIVE ══════════════════════════════════════════════════════════ -->
+  <section role="tabpanel" id="p-live" aria-labelledby="t-live">
+    <div class="card stopped" id="stoppednote" hidden>
+      <canvas id="sleepface" width="128" height="64" aria-hidden="true"></canvas>
+      <h2>The server is stopped</h2>
+      <p><span data-robot-name>{name}</span> shows the clock on his screen, but he can't hear, see or talk until the server runs. Settings still work.</p>
+      <button type="button" class="primary" id="startbtn2">Start server</button>
+    </div>
+    <div class="deck" id="livedeck">
+      <section aria-labelledby="l-sees">
+        <h2 class="label" id="l-sees"><span><span data-robot-name>{name}</span> sees</span><span class="sub"><span id="framenote"></span>
+          <button type="button" id="rotbtn" title="turn the camera picture 90 degrees clockwise" style="margin-left:10px;padding:5px 11px">Rotate ↻ <span id="rotv">—</span></button></span></h2>
+        <div class="viewport dark" id="viewport">
+          <img id="cam" alt="what the robot's camera sees">
+          <div class="reticle" aria-hidden="true"></div>
+          <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+          <div class="hudtop" aria-hidden="true"><span class="live">live</span><span id="hudfps"></span></div>
+          <div class="gauge pan" aria-hidden="true"><i id="pangauge"></i></div>
+          <div class="gauge tilt" aria-hidden="true"><i id="tiltgauge"></i></div>
+          <div class="readout"><span id="rpan">pan —</span><span id="rtilt">tilt —</span><span id="rtrack" class="off">not tracking</span></div>
+          <div class="nocam">No picture yet.<br>The robot's camera streams once it connects.</div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <h2 class="label"><span><span data-robot-name>{name}</span> hears</span><span class="sonar-state" id="hearstate">—</span></h2>
+          <div class="sonar"><canvas id="wave" aria-hidden="true"></canvas></div>
+          <p class="hint">Last 8 seconds of sound. Gold bars are where he heard a voice, grey is other sound (taller = louder), red is his own voice.</p>
+          <div class="chat">
+            <p class="line"><span class="who">You</span><span class="text" id="heard"></span></p>
+            <p class="line said" id="saidline"><span class="who"><span data-robot-name>{name}</span></span><span class="text" id="said"></span></p>
+          </div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <h2 class="label"><span><span data-robot-name>{name}</span> notices</span><span class="sonar-state" id="noticestate">—</span></h2>
+          <p class="line"><span class="who">People</span><span class="text" id="nperson"></span></p>
+          <p class="line"><span class="who">Hands</span><span class="text" id="nhands"></span></p>
+          <p class="hint">From two small models on this computer, a few times a second: faces, and hands for a wave. Boxes on the camera view show what they find. What's in the room he reads from the picture when you ask.</p>
+        </div>
+      </section>
+
+      <aside class="stack">
+        <div class="card">
+          <h2 class="label"><span>Face</span><span class="sub">tap one to show it</span></h2>
+          <div class="faces plain" id="faces"></div>
+        </div>
+        <div class="card">
+          <h2 class="label"><span>Talk</span></h2>
+          <form class="row" id="sayform">
+            <label for="saytext" class="visually-hidden">Words for <span data-robot-name>{name}</span></label>
+            <input type="text" id="saytext" name="text" placeholder="Words for {name}…" maxlength="300" autocomplete="off">
+            <button type="submit">Say it</button>
+            <button type="button" class="primary" id="askbtn">Ask him</button>
+          </form>
+          <p class="hint">Say it speaks the words as written. Ask him sends them to his brain.</p>
+        </div>
+        <div class="card">
+          <h2 class="label"><span>Head</span><span class="sub" id="headnote"></span></h2>
+          <div class="field"><label class="k" for="pan">Pan</label><input type="range" id="pan" min="-95" max="95" step="1" value="0"><span class="v" id="panv">0°</span></div>
+          <div class="field"><label class="k" for="tilt">Tilt</label><input type="range" id="tilt" min="-85" max="85" step="1" value="0"><span class="v" id="tiltv">0°</span></div>
+          <div class="row">
+            <button type="button" id="centerbtn">Center and relax</button>
+            <button type="button" id="trackbtn">Follow my face</button>
+            <button type="button" id="dancebtn">Dance</button>
+          </div>
+        </div>
+        <div class="card">
+          <h2 class="label"><span>Rest</span><span class="sub" id="awakenote"></span></h2>
+          <div class="row">
+            <button type="button" id="wakebtn">Wake up</button>
+            <button type="button" class="astro" id="sleepbtn">Go to sleep</button>
+          </div>
+          <p class="hint">Asleep, his screen shows the clock and weather.</p>
+        </div>
+        <div class="card">
+          <h2 class="label"><span>Focus</span><span class="sonar-state" id="focusstate">—</span></h2>
+          <div class="row">
+            <label for="focusmin" class="visually-hidden">Session length</label>
+            <select id="focusmin">
+              <option value="15">15 minutes</option><option value="25" selected>25 minutes</option>
+              <option value="45">45 minutes</option><option value="60">60 minutes</option>
+            </select>
+            <button type="button" class="primary" id="focusbtn">Start focus</button>
+          </div>
+          <p class="hint" id="focusnote">He watches you and tells you off when you pick up your phone. Or say "<span data-robot-name>{name}</span>, help me focus for 25 minutes".</p>
+          <p class="hint focusquiet"><strong>During a session <span data-robot-name>{name}</span> won't answer anything you say</strong>, so you can talk to people or to yourself. He only speaks up about your phone. To end early: End session, or say "hey <span data-robot-name>{name}</span>, stop focus".</p>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ══ SETTINGS ═════════════════════════════════════════════════════ -->
+  <section role="tabpanel" id="p-settings" aria-labelledby="t-settings" hidden>
+    <p class="notice" id="nolauncher" hidden>Settings are edited through the launcher: run <code>server/launcher.py</code> and open its dashboard (port 8766).</p>
+    <p class="notice" id="restartnote" hidden>Your name changes when the server restarts. <button type="button" id="restartbtn2">Restart now</button></p>
+    <form id="settingsform" class="grid2" novalidate>
+      <div class="stack">
+        <fieldset class="card">
+          <legend class="label"><span>Clock screen</span><span class="saved" data-saved="clock"></span></legend>
+          <p class="hint" style="margin:-6px 0 6px">What <span data-robot-name>{name}</span>'s screen shows while he sleeps.</p>
+          <fieldset class="set"><legend class="k">Time</legend>
+            <div class="choices"><label><input type="radio" name="clock.hour_format" value="12"> 12-hour (8:26 PM)</label>
+              <label><input type="radio" name="clock.hour_format" value="24"> 24-hour (20:26)</label></div></fieldset>
+          <fieldset class="set"><legend class="k">Date</legend>
+            <div class="choices"><label><input type="radio" name="clock.date_format" value="month_day"> Mon Oct 5</label>
+              <label><input type="radio" name="clock.date_format" value="day_month"> Mon 5 Oct</label></div>
+            <label class="check"><input type="checkbox" name="clock.show_weekday"> Show the day of the week</label></fieldset>
+          <div class="set"><label class="k" for="tz">Time zone</label>
+            <div class="row"><input type="text" id="tz" name="clock.timezone" placeholder="this computer's" autocomplete="off" spellcheck="false" aria-describedby="tzhint">
+              <button type="button" id="tzauto">Use this computer's</button></div>
+            <p class="hint" id="tzhint">A name like America/New_York or Europe/Berlin. Empty = this computer's (<span id="comptz">—</span>).</p></div>
+        </fieldset>
+
+        <fieldset class="card">
+          <legend class="label"><span>Screen</span><span class="saved" data-saved="screen"></span></legend>
+          <fieldset class="set"><legend class="k">While he sleeps</legend>
+            <div class="choices"><label><input type="radio" name="screen.idle_screen" value="clock"> Clock (time, date, weather)</label>
+              <label><input type="radio" name="screen.idle_screen" value="pong"> Pong</label>
+              <label><input type="radio" name="screen.idle_screen" value="tetris"> Tetris</label>
+              <label><input type="radio" name="screen.idle_screen" value="frogger"> Frogger</label>
+              <label><input type="radio" name="screen.idle_screen" value="roam"> Look around (his face stays up and his head roams the room)</label></div>
+            <p class="hint">The games play themselves and never lose, with the time in a corner. Night dimming applies to them too. Looking around switches to the clock at night. While he looks around he's still asleep: he only listens for "hey <span data-robot-name>{name}</span>" and no pictures go anywhere.</p></fieldset>
+          <div class="set"><label class="k" for="bri">Brightness</label>
+            <div class="slide"><input type="range" id="bri" name="screen.brightness" min="5" max="100" step="5"><output for="bri" data-unit="%"></output></div></div>
+          <fieldset class="set"><legend class="k">At night</legend>
+            <div class="choices"><label><input type="radio" name="screen.night_mode" value="off"> Same as day</label>
+              <label><input type="radio" name="screen.night_mode" value="dim"> Dim</label>
+              <label><input type="radio" name="screen.night_mode" value="dark"> Screen off</label></div>
+            <div class="times"><label for="n0" class="hint" style="margin:0">From</label><input type="time" id="n0" name="screen.night_start">
+              <label for="n1" class="hint" style="margin:0">to</label><input type="time" id="n1" name="screen.night_end"></div>
+            <div class="slide"><input type="range" id="nbri" name="screen.night_brightness" min="1" max="100" step="1" aria-label="night brightness"><output for="nbri" data-unit="%"></output></div>
+            <p class="hint">Night applies to the clock screen; his face stays at full brightness when you wake him. The clock also shifts a pixel or two each minute so the screen doesn't burn in.</p></fieldset>
+        </fieldset>
+
+        <fieldset class="card">
+          <legend class="label"><span>Vision</span><span class="saved" data-saved="vision"></span></legend>
+          <div class="set"><label class="check"><input type="checkbox" name="vision.every_question" aria-describedby="vqhint"> A picture with every question</label>
+            <p class="hint" id="vqhint">While he's awake, so he knows what you're doing. Off = only when you ask what he sees. Either way the picture goes to the AI provider.</p></div>
+          <fieldset class="set"><legend class="k">When he looks</legend>
+            <div class="choices"><label><input type="radio" name="vision.snapshot" value="uxga"> Sharpest (1600×1200)</label>
+              <label><input type="radio" name="vision.snapshot" value="xga"> Sharp (1024×768)</label>
+              <label><input type="radio" name="vision.snapshot" value="svga"> Quick (800×600)</label>
+              <label><input type="radio" name="vision.snapshot" value="off"> Stream frame (320×240)</label></div>
+            <p class="hint">A still the robot takes while you're talking, so it adds no wait.</p></fieldset>
+          <div class="set"><label class="check"><input type="checkbox" name="vision.perception" aria-describedby="vphint"> Notice faces and waves</label>
+            <p class="hint" id="vphint">Two small models on this computer (nothing leaves it): faces (smiling, looking at him, how far; a one-line note next to the picture when you ask what he sees) and hands, for a wave. Objects and what you hold he reads from the picture itself.</p>
+            <label class="check"><input type="checkbox" name="vision.gestures"> A wave wakes him</label></div>
+          <fieldset class="set"><legend class="k">Camera stream</legend>
+            <div class="choices"><label><input type="radio" name="vision.stream" value="vga"> Sharp (640×480)</label>
+              <label><input type="radio" name="vision.stream" value="qvga"> Light (320×240, less WiFi)</label></div></fieldset>
+        </fieldset>
+      </div>
+
+      <div class="stack">
+        <fieldset class="card">
+          <legend class="label"><span>Weather</span><span class="saved" data-saved="weather"></span></legend>
+          <p class="hint" style="margin:-6px 0 6px">From Open-Meteo: free, no account or key. The robot fetches it itself.</p>
+          <div class="set"><span class="k">Location</span>
+            <div class="here" id="here">not set: no weather on the clock</div>
+            <div class="row" role="search"><label for="placeq" class="visually-hidden">Search for a city or town</label>
+              <input type="search" id="placeq" placeholder="City or town…" autocomplete="off">
+              <button type="button" id="placego">Search</button>
+              <button type="button" id="placeclear" class="astro">Clear</button></div>
+            <ul class="results" id="results" aria-live="polite"></ul></div>
+          <div class="set"><label class="check"><input type="checkbox" name="weather.show"> Show the weather on the clock</label></div>
+          <fieldset class="set"><legend class="k">Units</legend>
+            <div class="choices"><label><input type="radio" name="weather.units" value="f"> °F</label>
+              <label><input type="radio" name="weather.units" value="c"> °C</label></div></fieldset>
+          <fieldset class="set"><legend class="k">Beside the temperature</legend>
+            <div class="choices"><label><input type="radio" name="weather.show_sun" value="false"> Today's high / low</label>
+              <label><input type="radio" name="weather.show_sun" value="true"> Sunrise / sunset</label></div></fieldset>
+          <div class="set"><label class="k" for="wxmin">Refresh every</label>
+            <select id="wxmin" name="weather.refresh_min"><option value="15">15 minutes</option><option value="30">30 minutes</option>
+              <option value="60">hour</option><option value="120">2 hours</option></select></div>
+        </fieldset>
+
+        <fieldset class="card">
+          <legend class="label"><span><span data-robot-name>{name}</span></span><span class="saved" data-saved="rocky"></span></legend>
+          <div class="set"><label class="k" for="hname">Your name <span class="badge">restart</span></label>
+            <input type="text" id="hname" name="rocky.human_name" maxlength="40" autocomplete="given-name" aria-describedby="hnamehint">
+            <p class="hint" id="hnamehint">What he calls you. Empty = HUMAN_NAME from server/.env, else "friend".</p></div>
+          <div class="set"><label class="k" for="awake">Stays awake after you talk</label>
+            <div class="slide"><input type="range" id="awake" name="rocky.awake_seconds" min="10" max="600" step="5"><output for="awake" data-unit=" s"></output></div></div>
+          <div class="set"><label class="k" for="vol">Speaker volume</label>
+            <div class="slide"><input type="range" id="vol" name="rocky.volume" min="0" max="1" step="0.05"><output for="vol" data-fixed="2"></output></div></div>
+          <fieldset class="set"><legend class="k">His voice plays on</legend>
+            <div class="choices"><label><input type="radio" name="rocky.speaker_out" value="robot"> The robot's speaker</label>
+              <label><input type="radio" name="rocky.speaker_out" value="computer"> This computer</label></div></fieldset>
+          <div class="set"><label class="k" for="micsel">He listens through</label>
+            <div class="row"><select id="micsel" aria-describedby="michint"><option value="auto">Automatic</option></select>
+              <button type="button" id="micscan">Look for mics</button></div>
+            <p class="hint" id="michint">Automatic = the robot's mic while it's connected, otherwise this computer's. A mic that's unplugged counts as Automatic until it's back.</p></div>
+          <div class="set"><label class="k" for="rot">Camera picture turned</label>
+            <select id="rot" name="rocky.camera_rotate"><option value="0">0°</option><option value="90">90° clockwise</option>
+              <option value="180">180°</option><option value="270">270° clockwise (V2 head)</option></select></div>
+          <div class="set"><label class="check"><input type="checkbox" name="rocky.body_language" aria-describedby="bodyhint"> Body language</label>
+            <p class="hint" id="bodyhint">Small head moves that go with how he feels while he talks, and a glance up while he thinks. He keeps still while asleep, while following your face, and while he takes a picture.</p></div>
+        </fieldset>
+
+        <fieldset class="card">
+          <legend class="label"><span>Computer</span><span class="saved" data-saved="computer"></span></legend>
+          <div class="set"><label class="check"><input type="checkbox" name="computer.control" aria-describedby="pchint pcplatform"> Let <span data-robot-name>{name}</span> use my computer</label>
+            <p class="hint" id="pchint">He can search the web, open websites and the apps below, play or pause music, change the volume and run the Shortcuts you pick. He can't type, click, log in or buy anything. Anyone talking near him can ask too, so switch it off when that matters.</p>
+            <p class="hint" id="pcplatform">Apps, music, volume and Shortcuts work on a Mac only. On Windows or Linux he can search the web and open websites.</p></div>
+          <div class="set"><label class="k" for="pcapps">Apps he may open</label>
+            <textarea id="pcapps" name="computer.apps" rows="2" maxlength="1000" spellcheck="false" aria-describedby="pcappshint"></textarea>
+            <p class="hint" id="pcappshint">Names as they appear in Applications, separated by commas.</p></div>
+          <div class="set"><label class="k" for="pcbm">Bookmarks</label>
+            <textarea id="pcbm" name="computer.bookmarks" rows="3" maxlength="3000" spellcheck="false" placeholder="My GitHub = https://github.com/me" aria-describedby="pcbmhint"></textarea>
+            <p class="hint" id="pcbmhint">One per line: a name, then = and the address. He already knows Google, Amazon, YouTube, Maps, Wikipedia, GitHub, eBay, Reddit and Gmail.</p></div>
+          <div class="set"><label class="k" for="pcsc">Shortcuts he may run</label>
+            <textarea id="pcsc" name="computer.shortcuts" rows="2" maxlength="1000" spellcheck="false" placeholder="none yet"></textarea>
+            <div class="row"><button type="button" id="pclist">Pick from my Shortcuts</button></div>
+            <ul class="results" id="pcshortcuts" aria-live="polite"></ul>
+            <label class="check"><input type="checkbox" name="computer.confirm_shortcuts"> Ask me before running a shortcut</label></div>
+          <div class="set"><span class="k">Spotify</span>
+            <p class="hint" id="spotifynote" style="margin:0">—</p></div>
+        </fieldset>
+      </div>
+    </form>
+
+    <details class="adv card" id="advanced">
+      <summary>Advanced: listening and voice tuning</summary>
+      <div class="grid2" style="margin-top:12px">
+        <div><h3 class="label">Listening</h3><div id="tunes"></div></div>
+        <div><h3 class="label">Voice</h3><div id="voicetunes"></div></div>
+      </div>
+      <p class="hint">Saved and applied straight away. <button type="button" id="advreset">Back to the defaults</button></p>
+    </details>
+  </section>
+
+  <!-- ══ PERSONALITIES ════════════════════════════════════════════════ -->
+  <section role="tabpanel" id="p-chars" aria-labelledby="t-chars" hidden>
+    <p class="notice" id="charsnolauncher" hidden>Personalities are picked and made through the launcher: run <code>server/launcher.py</code> and open its dashboard (port 8766).</p>
+    <div id="charsbody" hidden>
+      <div class="card">
+        <h2 class="label"><span>Personalities</span><span class="sub">who the robot is</span></h2>
+        <div class="packs" id="charlist"></div>
+        <div class="row" style="margin-top:14px">
+          <button type="button" class="primary" id="charnew">New personality</button>
+          <label class="linkish">Import a personality file…<input type="file" id="charimport" accept=".json,application/json" class="visually-hidden"></label>
+        </div>
+        <p class="hint">Switching restarts the server, so the conversation starts fresh. Yours are saved in <code>server/characters/</code>. A personality tells the language model how to behave: read one from someone else before you use it.</p>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <h2 class="label"><span id="chartitle">—</span><span class="saved" id="charsaved"></span></h2>
+        <p class="hint" id="chardesc" style="margin:-6px 0 12px"></p>
+        <div class="row" id="charactions">
+          <button type="button" class="primary" id="charuse">Use this personality</button>
+          <button type="button" id="charexport">Export</button>
+          <button type="button" id="chardup">Duplicate</button>
+          <button type="button" class="astro" id="chardelete">Delete</button>
+        </div>
+        <form id="charform" class="charform" novalidate hidden>
+          <div class="grid2">
+            <div>
+              <div class="set"><label class="k" for="c-name">Name</label>
+                <input type="text" id="c-name" maxlength="24" autocomplete="off" spellcheck="false" placeholder="Juniper" aria-describedby="c-namehint">
+                <p class="hint" id="c-namehint">Also the wake word: “hey <span id="c-nameecho">…</span>”.</p></div>
+              <div class="set"><label class="k" for="c-voice">Voice</label>
+                <div class="row"><input type="text" id="c-voice" autocomplete="off" spellcheck="false" placeholder="Fish Audio voice ID, or the voice's address" aria-describedby="c-voicehint">
+                  <button type="button" id="c-test">Test voice</button></div>
+                <p class="hint" id="c-voicehint">Open a voice on <a href="https://fish.audio/discovery/" target="_blank" rel="noopener">fish.audio</a> and copy the long ID from its address, or paste the whole address. Test voice plays a sample here on this computer.</p></div>
+              <fieldset class="set"><legend class="k">Voice model</legend>
+                <div class="choices"><label><input type="radio" name="c-model" value="drama-3"> Drama 3 (acts: sighs, laughs, whispers)</label>
+                  <label><input type="radio" name="c-model" value=""> S2.1 Pro (standard: steady, natural reading)</label></div>
+                <p class="hint">Drama 3 performs short directions the personality writes into its replies, like [small laugh] or &lt;whisper&gt;…&lt;/whisper&gt;. S2.1 Pro is Fish's standard model, the one Rocky uses: a calm, consistent read of the words with no acting directions.</p>
+                <p class="hint">Cost (Fish Audio's API, per million bytes of text, about 12 hours of speech): <b>Drama 3</b> $50, on sale for $10 until Nov 12, 2026, so about $7.50 per thousand replies ($1.50 on sale). <b>S2.1 Pro</b> $15, about $2.25 per thousand replies. A reply is about 150 bytes.</p></fieldset>
+              <div class="set"><label class="k" for="c-desc">Describe the personality</label>
+                <textarea id="c-desc" rows="4" maxlength="1000" placeholder="A dramatic old sea captain who's suspicious of technology and tells too many stories about the sea."></textarea>
+                <div class="row"><button type="button" class="primary" id="c-draft">Write it for me</button></div>
+                <p class="hint">The language model writes everything on the right from this. Press it again for a different take (each one costs a fraction of a cent), then edit anything you like.</p></div>
+            </div>
+            <div>
+              <div class="set"><label class="k" for="c-prompt">Personality</label>
+                <textarea id="c-prompt" rows="14" maxlength="6000" spellcheck="true" aria-describedby="c-prompthint"></textarea>
+                <p class="hint" id="c-prompthint">Who they are and how they talk. Write {human} where your name goes. The robot's own rules (short spoken replies, the camera, the head, the face) are added for every personality.</p></div>
+              <div class="set"><label class="k" for="c-examples">Example replies</label>
+                <textarea id="c-examples" rows="7" maxlength="3000" aria-describedby="c-exhint"></textarea>
+                <p class="hint" id="c-exhint">One per line, each starting with a face: [happy], [thinking]… These shape how they sound more than anything.</p></div>
+              <fieldset class="set"><legend class="k">Said without thinking</legend>
+                <div class="lines">
+                  <label>Woken with nothing else said<input type="text" id="c-l-wake" maxlength="200"></label>
+                  <label>Going to sleep<input type="text" id="c-l-sleep" maxlength="200"></label>
+                  <label>Starting to follow your face<input type="text" id="c-l-track_on" maxlength="200"></label>
+                  <label>Stopping<input type="text" id="c-l-track_off" maxlength="200"></label>
+                </div></fieldset>
+              <div class="set"><label class="k" for="c-wake">Wake words</label>
+                <textarea id="c-wake" rows="4" spellcheck="false" aria-describedby="c-wakehint"></textarea>
+                <p class="hint" id="c-wakehint">One per line: what speech-to-text tends to hear for “hey <span class="c-nameecho2">…</span>”. If the Log shows it mishearing the name, add what it heard.</p></div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button type="button" class="primary" id="c-save" disabled>Save</button>
+            <button type="button" id="c-saveuse" disabled>Save and use</button>
+            <button type="button" id="c-revert" disabled>Undo changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ FACES ════════════════════════════════════════════════════════ -->
+  <section role="tabpanel" id="p-faces" aria-labelledby="t-faces" hidden>
+    <p class="notice" id="facesnolauncher" hidden>Face packs are picked and edited through the launcher: run <code>server/launcher.py</code> and open its dashboard (port 8766).</p>
+    <div id="facesbody" hidden>
+      <div class="card">
+        <h2 class="label"><span>Face packs</span><span class="sub">what <span data-robot-name>{name}</span>'s eyes look like</span></h2>
+        <div class="packs" id="packs"></div>
+        <p class="hint">Built-in packs are in <code>server/faces/</code>; yours are saved in <code>server/faces/custom/</code>.
+          <label class="linkish">Import a pack file…<input type="file" id="packimport" accept=".json,application/json" class="visually-hidden"></label></p>
+      </div>
+      <div class="facedeck">
+        <div class="card">
+          <h2 class="label"><span id="packtitle">—</span><span class="sub" id="packauthor"></span></h2>
+          <p class="hint" id="packdesc" style="margin:-6px 0 12px"></p>
+          <div class="row" style="margin-bottom:14px">
+            <button type="button" class="primary" id="packuse">Use this pack</button>
+            <button type="button" id="packdup">Duplicate to edit</button>
+            <button type="button" id="packexport">Export</button>
+            <button type="button" class="astro" id="packdelete">Delete</button>
+          </div>
+          <div class="gallery" id="gallery" aria-label="every face in this pack"></div>
+          <p class="hint">These move the way they will on <span data-robot-name>{name}</span>: blinks, glances and flourishes. Click one to look closer, or to change it in your own packs.</p>
+        </div>
+        <aside class="card" id="sidepanel">
+          <div class="pinned">
+            <h2 class="label"><span id="seltitle">Neutral</span><span class="saved" id="facesaved"></span></h2>
+            <canvas class="oled" id="bigface" width="128" height="64" role="img" aria-label="the selected face"></canvas>
+            <div class="row" style="margin-top:12px">
+              <button type="button" id="tryon">Show on <span data-robot-name>{name}</span></button>
+              <label class="check"><input type="checkbox" id="livemirror"> Mirror edits on <span data-robot-name>{name}</span></label>
+            </div>
+          </div>
+          <p class="hint" id="builtinnote">Built-in packs stay as they are. Duplicate one to make your own version you can change.</p>
+          <div id="editor" hidden>
+            <p class="hint" id="talknote" hidden>Talking is the neutral face with a mouth that moves with his voice.</p>
+            <fieldset class="set" id="eyemode"><legend class="k">Change</legend>
+              <div class="choices"><label><input type="radio" name="eyemode" value="both" checked> Both eyes</label>
+                <label><input type="radio" name="eyemode" value="left"> Left eye</label>
+                <label><input type="radio" name="eyemode" value="right"> Right eye</label></div></fieldset>
+            <div id="eyesliders"></div>
+            <fieldset class="set" id="fxset"><legend class="k">Flourishes</legend><div class="fxboxes" id="fxboxes"></div></fieldset>
+            <div id="lookfields"></div>
+            <div class="row" style="margin-top:10px">
+              <button type="button" class="primary" id="facesave" disabled>Save</button>
+              <button type="button" id="facerevert" disabled>Undo changes</button>
+            </div>
+            <details class="adv" style="margin-top:14px"><summary>Whole pack</summary>
+              <div class="set"><label class="k" for="pk-name">Name</label><input type="text" id="pk-name" maxlength="24"></div>
+              <div class="set"><label class="k" for="pk-author">Made by</label><input type="text" id="pk-author" maxlength="40"></div>
+              <div class="set"><label class="k" for="pk-desc">Description</label><textarea id="pk-desc" rows="2" maxlength="160"></textarea></div>
+              <div class="set"><label class="k" for="pk-gap">Space between the eyes</label>
+                <div class="slide"><input type="range" id="pk-gap" min="0" max="60" step="1"><output for="pk-gap" id="pk-gapv"></output></div></div>
+              <div class="set"><label class="k" for="pk-y">Eye height (+ = lower)</label>
+                <div class="slide"><input type="range" id="pk-y" min="-20" max="20" step="1"><output for="pk-y" id="pk-yv"></output></div></div>
+              <div class="set"><label class="check"><input type="checkbox" id="pk-cyclops"> One eye in the middle</label>
+                <label class="check"><input type="checkbox" id="pk-outline"> Outlined eyes</label>
+                <label class="check"><input type="checkbox" id="pk-glint"> Pupils that look around</label></div>
+              <fieldset class="set"><legend class="k">Mouth</legend>
+                <div class="choices"><label><input type="radio" name="pk-mouth" value="talk"> While talking</label>
+                  <label><input type="radio" name="pk-mouth" value="always"> Always (smiles and frowns)</label>
+                  <label><input type="radio" name="pk-mouth" value="never"> Never</label></div></fieldset>
+            </details>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ LOG ══════════════════════════════════════════════════════════ -->
+  <section role="tabpanel" id="p-log" aria-labelledby="t-log" hidden>
+    <div class="card">
+      <h2 class="label"><span>Server output</span><span class="sub" id="lognote"></span></h2>
+      <pre class="log" id="log" tabindex="0" aria-label="server output"></pre>
+      <form class="cmd" id="cmdform">
+        <label for="cmd" class="visually-hidden">Command for the server</label>
+        <input type="text" id="cmd" placeholder="A console command: ask …, say …, track on, status, mic …" autocomplete="off" spellcheck="false">
+        <button type="submit">Send</button>
+      </form>
+      <p class="hint">Commands go to the server's own console, the same as typing in its terminal.</p>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+// The robot's face, drawn here the same way firmware/src/face.cpp draws it (same shapes, same arithmetic), so the
+// Faces tab shows what Rocky's screen will. Change one, change the other.
+const FaceKit = (() => {
+  const W = 128, H = 64;
+  const EYE_KEYS = ["w", "h", "rt", "rb", "st", "sb", "lid", "cheek", "dx", "dy"];
+  const EYE_DEF = { w: 34, h: 34, rt: 12, rb: 12, st: 0, sb: 0, lid: 0, cheek: 0, dx: 0, dy: 0 };
+  const LIMITS = { w: [4, 120], h: [2, 64], rt: [0, 32], rb: [0, 32], st: [-30, 30], sb: [-30, 30],
+                   lid: [0, 40], cheek: [0, 40], dx: [-30, 30], dy: [-30, 30] };
+  const BANG = ["###", "###", "###", "###", "###", "###", "###", "...", "###", "###"];
+  const QUESTION = [".#####.", "##...##", "##...##", ".....##", "....##.", "...##..", "..##...", "..##...", ".......", "..##...", "..##..."];
+  const HEART = [".##.##.", "#######", "#######", ".#####.", "..###..", "...#..."];
+  const clamp = (x, lo, hi) => x < lo ? lo : x > hi ? hi : x;       // as Arduino's constrain()
+  const rnd = (a, b) => a + Math.floor(Math.random() * (b - a));   // as Arduino's random(a, b)
+  const approach = (c, t, f) => c + (t - c) * f;
+  const fl = Math.floor;
+  let fallback = null;   // Rocky's pack, resolved: what the robot uses for anything a pack leaves out
+
+  function readEye(o, base) {
+    const e = { ...base };
+    if (o) for (const k of EYE_KEYS) if (typeof o[k] === "number") e[k] = clamp(o[k], LIMITS[k][0], LIMITS[k][1]);
+    return e;
+  }
+  // A pack file -> what the drawing code uses (Face::applyPackJson).
+  function resolve(p, emotions) {
+    const fb = fallback;
+    const r = {
+      name: p.name || "unnamed", gap: clamp(p.gap ?? 16, 0, 60), y: clamp(p.y ?? 0, -20, 20),
+      cyclops: !!p.cyclops, outline: !!p.outline, glint: p.glint !== false,
+      mouth: p.mouth === "always" ? 1 : p.mouth === "never" ? 2 : 0,
+      asleep: readEye(p.asleep, fb ? fb.asleep : { ...EYE_DEF, w: 30, h: 3, rt: 1, rb: 1 }), looks: {},
+    };
+    for (const name of emotions) {
+      const e = p.emotions && p.emotions[name];
+      if (!e) {
+        r.looks[name] = fb && fb.looks[name] ? fb.looks[name]
+          : { l: { ...EYE_DEF }, r: { ...EYE_DEF }, gazeX: 0, gazeY: 0, pop: 0.12, smile: 0, fx: new Set() };
+        continue;
+      }
+      const l = readEye(e, EYE_DEF);
+      r.looks[name] = {
+        l, r: readEye(e.right, l), pop: clamp(e.pop ?? 0.12, 0, 0.6), smile: clamp(e.smile ?? 0, -6, 6),
+        gazeX: clamp((e.gaze || [])[0] ?? 0, -20, 20), gazeY: clamp((e.gaze || [])[1] ?? 0, -20, 20),
+        fx: new Set(e.fx || []),
+      };
+    }
+    return r;
+  }
+
+  function morph(c, t, f) { for (const k of EYE_KEYS) c[k] = approach(c[k], t[k], f); }
+
+  function inEye(g, x, y) {
+    if (x < g.left || x >= g.right || y < g.top || y >= g.bot) return false;
+    const u = (x - g.cx) / (g.w * 0.5) * g.inner;
+    const topCut = g.st >= 0 ? g.st * (u + 1) * 0.5 : -g.st * (1 - u) * 0.5;
+    const botCut = g.sb >= 0 ? g.sb * (u + 1) * 0.5 : -g.sb * (1 - u) * 0.5;
+    const hh = g.bot - g.top;
+    const yy = y - topCut * (g.bot - y) / hh + botCut * (y - g.top) / hh;
+    if (yy < g.top + g.lid || yy >= g.bot) return false;
+    if (yy < g.top + g.rt) {
+      const qx = clamp(x, g.left + g.rt, g.right - g.rt), dx = x - qx, dy = yy - (g.top + g.rt);
+      if (dx * dx + dy * dy > g.rt * g.rt) return false;
+    }
+    if (yy > g.bot - g.rb) {
+      const qx = clamp(x, g.left + g.rb, g.right - g.rb), dx = x - qx, dy = yy - (g.bot - g.rb);
+      if (dx * dx + dy * dy > g.rb * g.rb) return false;
+    }
+    if (g.cheek > 0.5) {
+      const rr = g.w, ccy = g.bot + rr - g.cheek, dx = x - g.cx, dy = y - ccy;
+      if (dx * dx + dy * dy < rr * rr) return false;
+    }
+    return true;
+  }
+
+  class Sim {
+    constructor(pack, emotion = "neutral", now = performance.now()) {
+      this.pack = pack; this.buf = new Uint8Array(W * H);
+      this.emotion = null; this.idle = true; this.still = false; this.asleep = false;
+      this.talking = false; this.mouthLevel = 0; this.mouth = 0;
+      this.blink = 0; this.blinkClosing = false;
+      this.gazeX = 0; this.gazeY = 0; this.gtx = 0; this.gty = 0;
+      this.pupilX = 0; this.pupilY = 0; this.ptx = 0; this.pty = 0; this.nextPupil = now + rnd(300, 1500);
+      this.pop = 0; this.squint = 0; this.tearY = -1; this.thinkDots = 0; this.jitter = 0;
+      this.hearts = [0, 1, 2].map(() => ({ alive: false, x: 0, y: 0, age: 0 })); this.heartSide = false;
+      this.zeds = [0, 1, 2].map(() => ({ alive: false, x: 0, y: 0, age: 0 }));
+      this.breath = 0; this.twitch = 0; this.frame = 0;
+      this.nextBlink = now + rnd(800, 4000); this.nextSaccade = now + rnd(500, 2500); this.nextSquint = now + rnd(4000, 12000);
+      this.nextTear = 0; this.nextDot = 0; this.nextHeart = 0; this.nextZed = now + 800; this.nextTwitch = now + rnd(5000, 9000);
+      this.since = now;
+      this.setEmotion(emotion, now);
+      const look = pack.looks[emotion];
+      this.curL = { ...look.l }; this.curR = { ...look.r }; this.smile = look.smile; this.pop = 0;
+    }
+    setPack(pack, now = performance.now()) {
+      this.pack = pack;
+      const e = this.emotion; this.emotion = null; this.setEmotion(e, now);
+      if (this.still) this.setStill(e, now);
+    }
+    setEmotion(e, now = performance.now()) {
+      if (e !== this.emotion) {
+        this.pop = 1; this.since = now; this.tearY = -1; this.nextTear = now + 1500; this.thinkDots = 0;
+        for (const h of this.hearts) h.alive = false;
+        this.nextHeart = now + 200;
+      }
+      this.emotion = e;
+      const look = this.pack.looks[e];
+      this.gtx = look.gazeX; this.gty = look.gazeY;
+    }
+    setAsleep(on, now = performance.now()) {
+      if (on === this.asleep) return;
+      this.asleep = on;
+      if (on) {
+        for (const z of this.zeds) z.alive = false;
+        this.nextZed = now + 800; this.nextTwitch = now + rnd(5000, 9000); this.gtx = this.gty = 0;
+      } else { this.pop = 1; this.blink = 0; this.setEmotion(this.emotion, now); }
+    }
+    // Face::setStill: the emotion settled, no blinks, glances or flourishes.
+    setStill(e, now = performance.now()) {
+      this.still = true; this.asleep = false; this.setEmotion(e, now);
+      const look = this.pack.looks[e];
+      this.curL = { ...look.l }; this.curR = { ...look.r }; this.smile = look.smile;
+      this.blink = 0; this.blinkClosing = false; this.pop = this.squint = this.twitch = 0;
+      this.gazeX = this.gtx; this.gazeY = this.gty; this.mouth = 0; this.talking = false; this.jitter = 0;
+      this.pupilX = this.pupilY = this.ptx = this.pty = 0;
+    }
+
+    step(now) {
+      this.frame++;
+      if (this.still) return;
+      const look = this.pack.looks[this.emotion], P = this.pack;
+      const f = this.asleep ? 0.12 : 0.25;
+      morph(this.curL, this.asleep ? P.asleep : look.l, f);
+      morph(this.curR, this.asleep ? P.asleep : look.r, f);
+      this.smile = approach(this.smile, this.asleep ? 0 : look.smile, f);
+      this.pop *= 0.82; this.squint *= 0.85;
+
+      if (this.asleep) {
+        this.breath += 0.035; this.blink = 0; this.blinkClosing = false; this.twitch *= 0.8;
+        if (now >= this.nextTwitch) { this.twitch = 1; this.nextTwitch = now + rnd(6000, 12000); }
+        if (now >= this.nextZed) {
+          for (const z of this.zeds) {
+            if (!z.alive) {
+              z.alive = true; z.age = 0;
+              z.x = Math.min(P.cyclops ? W / 2 + this.curL.w / 2 + 2 : W / 2 + P.gap / 2 + this.curL.w + 2, 108);
+              z.y = H / 2 - 6;
+              break;
+            }
+          }
+          this.nextZed = now + rnd(1100, 1700);
+        }
+        for (const z of this.zeds) {
+          if (!z.alive) continue;
+          z.age += 0.012; z.y -= 0.32; z.x += 0.22;
+          if (z.age >= 1 || z.y < -12) z.alive = false;
+        }
+        this.gazeX = approach(this.gazeX, 0, 0.2); this.gazeY = approach(this.gazeY, 0, 0.2);
+        this.mouth = approach(this.mouth, 0, 0.3);
+        return;
+      }
+
+      if (this.blinkClosing) {
+        this.blink += 0.45;
+        if (this.blink >= 1) { this.blink = 1; this.blinkClosing = false; }
+      } else if (this.blink > 0) this.blink = Math.max(0, this.blink - 0.28);
+
+      if (this.idle) {
+        if (now >= this.nextBlink) {
+          this.blinkClosing = true; this.nextBlink = now + rnd(2200, 6000);
+          if (rnd(0, 100) < 20) this.nextBlink = now + 400;
+        }
+        const looksSomewhere = look.gazeX !== 0 || look.gazeY !== 0;
+        if (now >= this.nextSaccade && !looksSomewhere) {
+          this.gtx = rnd(-8, 9); this.gty = rnd(-4, 5);
+          if (rnd(0, 100) < 40) this.gtx = this.gty = 0;
+          this.nextSaccade = now + rnd(1200, 4000);
+        }
+        if (now >= this.nextPupil) {   // the pupils look at something new (Face::stepAnimation)
+          if (rnd(0, 100) < 35) { this.ptx = rnd(-25, 26) / 100; this.pty = rnd(-20, 21) / 100; }
+          else { this.ptx = rnd(-90, 91) / 100; this.pty = rnd(-60, 61) / 100; }
+          this.nextPupil = now + rnd(600, 2600);
+        }
+        if (now >= this.nextSquint && this.emotion === "neutral") { this.squint = 1; this.nextSquint = now + rnd(8000, 16000); }
+      }
+
+      if (look.fx.has("tear")) {
+        if (this.tearY < 0 && now >= this.nextTear) this.tearY = 0;
+        if (this.tearY >= 0) {
+          this.tearY += 0.7;
+          if (this.tearY > H) { this.tearY = -1; this.nextTear = now + rnd(2500, 5000); }
+        }
+      }
+      if (look.fx.has("dots") && now >= this.nextDot) { this.thinkDots = (this.thinkDots + 1) % 4; this.nextDot = now + 420; }
+      if (look.fx.has("hearts") && now >= this.nextHeart) {
+        for (const h of this.hearts) {
+          if (!h.alive) {
+            h.alive = true; h.age = 0; this.heartSide = !this.heartSide;
+            h.x = this.heartSide ? W / 2 + P.gap / 2 + this.curR.w + 2 : W / 2 - P.gap / 2 - this.curL.w - 9;
+            if (P.cyclops) h.x = this.heartSide ? W / 2 + this.curL.w / 2 + 3 : W / 2 - this.curL.w / 2 - 10;
+            h.y = H / 2 + 6;
+            break;
+          }
+        }
+        this.nextHeart = now + rnd(600, 1000);
+      }
+      for (const h of this.hearts) {
+        if (!h.alive) continue;
+        h.age += 0.015; h.y -= 0.45;
+        if (h.age >= 1 || h.y < -6) h.alive = false;
+      }
+      this.jitter = (look.fx.has("shake") && this.frame % 3 === 0) ? rnd(-1, 2) : 0;
+
+      const mouthGoal = this.talking ? clamp(0.15 + this.mouthLevel * 4, 0.15, 1) : 0;
+      this.mouth = approach(this.mouth, mouthGoal, this.talking ? 0.5 : 0.3);
+      this.gazeX = approach(this.gazeX, this.gtx, 0.35); this.gazeY = approach(this.gazeY, this.gty, 0.35);
+      this.pupilX = approach(this.pupilX, this.ptx, 0.5); this.pupilY = approach(this.pupilY, this.pty, 0.5);
+    }
+
+    // ── pixels ──
+    dot(x, y, c) { if (x >= 0 && y >= 0 && x < W && y < H) this.buf[y * W + x] = c; }
+    rect(x, y, w, h, c) { for (let j = 0; j < h; ++j) for (let i = 0; i < w; ++i) this.dot(x + i, y + j, c); }
+    roundBox(x, y, w, h, r, c) {
+      r = Math.min(r, Math.min(w, h) * 0.5);
+      for (let j = 0; j < h; ++j) for (let i = 0; i < w; ++i) {
+        const px = i + 0.5, py = j + 0.5, qx = clamp(px, r, w - r), qy = clamp(py, r, h - r);
+        if ((px - qx) * (px - qx) + (py - qy) * (py - qy) <= r * r) this.dot(x + i, y + j, c);
+      }
+    }
+    line(x0, y0, x1, y1) {
+      const dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1, dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+      let err = dx + dy;
+      for (;;) {
+        this.dot(x0, y0, 1);
+        if (x0 === x1 && y0 === y1) break;
+        const e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+      }
+    }
+    disc(cx, cy, r) { for (let j = -r; j <= r; ++j) for (let i = -r; i <= r; ++i) if (i * i + j * j <= r * r + r) this.dot(cx + i, cy + j, 1); }
+    glyph(rows, x, y) { rows.forEach((row, j) => { for (let i = 0; i < row.length; ++i) if (row[i] === "#") this.dot(x + i, y + j, 1); }); }
+
+    drawEye(e, cx, cy, inner, hScale) {
+      const P = this.pack, w = e.w;
+      let h = e.h * hScale * (1 - this.blink);
+      if (h < 2) h = 2;
+      const g = { cx: cx - inner * e.dx, w, st: e.st, sb: e.sb, lid: e.lid, cheek: e.cheek, inner };
+      const ecy = cy + e.dy;
+      g.left = g.cx - w * 0.5; g.right = g.cx + w * 0.5; g.top = ecy - h * 0.5; g.bot = ecy + h * 0.5;
+      g.rt = Math.max(0, Math.min(e.rt, Math.min(w, h) * 0.5)); g.rb = Math.max(0, Math.min(e.rb, Math.min(w, h) * 0.5));
+      const x0 = fl(g.left), x1 = Math.ceil(g.right), y0 = fl(g.top), y1 = Math.ceil(g.bot);
+      for (let y = y0; y < y1; ++y) for (let x = x0; x < x1; ++x) {
+        const px = x + 0.5, py = y + 0.5;
+        let on = inEye(g, px, py);
+        if (on && P.outline) on = !(inEye(g, px - 2, py) && inEye(g, px + 2, py) && inEye(g, px, py - 2) && inEye(g, px, py + 2));
+        if (on) this.dot(x, y, 1);
+      }
+      if (P.glint && h > 12 && !this.asleep) this.drawPupil(g, x0, x1, y0, y1);
+    }
+    // Pupil: a dark disc (lit in outline packs) with a highlight, in the part of the eye that shows (Face::drawEye).
+    drawPupil(g, x0, x1, y0, y1) {
+      const P = this.pack, r = clamp(g.w * 0.14, 3, 6);
+      let top = -1, bot = -1;
+      for (let y = y0; y < y1; ++y) if (inEye(g, g.cx, y + 0.5)) { if (top < 0) top = y; bot = y; }
+      if (top < 0) return;
+      const vcy = (top + bot + 1) * 0.5;
+      let left = -1, right = -1;
+      for (let x = x0; x < x1; ++x) if (inEye(g, x + 0.5, vcy)) { if (left < 0) left = x; right = x; }
+      if (left < 0) return;
+      const vcx = (left + right + 1) * 0.5;
+      const roomX = Math.max(0, (right - left + 1) * 0.5 - r - 2), roomY = Math.max(0, (bot - top + 1) * 0.5 - r - 1.5);
+      const px = clamp(this.pupilX + this.gazeX / 12, -1, 1), py = clamp(this.pupilY + this.gazeY / 8, -1, 1);
+      const pcx = vcx + px * roomX, pcy = vcy + py * roomY, ink = P.outline ? 1 : 0, ri = Math.ceil(r);
+      for (let y = fl(pcy) - ri; y <= fl(pcy) + ri; ++y) for (let x = fl(pcx) - ri; x <= fl(pcx) + ri; ++x) {
+        const dx = x + 0.5 - pcx, dy = y + 0.5 - pcy;
+        if (dx * dx + dy * dy <= r * r && inEye(g, x + 0.5, y + 0.5)) this.dot(x, y, ink);
+      }
+      if (!P.outline && r >= 4) {
+        const hx = fl(pcx - r * 0.5), hy = fl(pcy - r * 0.55);
+        if (inEye(g, hx + 0.5, hy + 0.5)) this.rect(hx, hy, 2, 2, 1);
+      }
+    }
+    drawMouth(cx, cy) {
+      const P = this.pack, my0 = fl(cy + this.curL.h * 0.5);
+      if (this.mouth >= 0.05 && P.mouth !== 2) {
+        const mh = 2 + fl(this.mouth * 9), mw = 20 + fl(this.mouth * 8);
+        let my = my0 + 4;
+        if (my + mh > H - 1) my = H - 1 - mh;
+        this.roundBox(cx - Math.trunc(mw / 2), my, mw, mh, Math.min(Math.trunc(mh / 2), 4), 1);
+        if (mh > 6) this.roundBox(cx - Math.trunc(mw / 2) + 3, my + 2, mw - 6, mh - 4, 2, 0);
+      } else if (P.mouth === 1) {
+        const mw = 14, my = Math.min(my0 + 6, H - 4);
+        for (let i = 0; i <= mw; ++i) {
+          const t = (i - mw * 0.5) / (mw * 0.5), yy = fl(my + this.smile * (1 - t * t) + 0.5);
+          this.dot(cx - mw / 2 + i, yy, 1); this.dot(cx - mw / 2 + i, yy + 1, 1);
+        }
+      }
+    }
+    drawFlourishes(leftOuter, rightOuter, eyeTop, eyeBottom, now) {
+      const fx = this.pack.looks[this.emotion].fx, since = now - this.since;
+      const lo = fl(leftOuter), ro = fl(rightOuter);
+      if (fx.has("pop") && since < 900) this.glyph(BANG, 116, 4);
+      if (fx.has("blush")) for (let i = 0; i < 2; ++i) {
+        const lx = lo - 8 + i * 3, rx = ro + 3 + i * 3;
+        this.line(lx, eyeBottom + 1, lx + 3, eyeBottom - 3); this.line(rx, eyeBottom + 1, rx + 3, eyeBottom - 3);
+      }
+      if (fx.has("tear") && this.tearY >= 0) {
+        const tx = ro - 3, ty = eyeBottom + fl(this.tearY);
+        this.disc(tx, ty, 2); this.line(tx, ty - 5, tx, ty - 2);
+      }
+      if (fx.has("dots")) for (let i = 0; i < this.thinkDots; ++i) this.disc(W - 26 + i * 8, 9, 2);
+      if (fx.has("steam") && fl(this.frame / 6) % 2 === 0) {
+        this.line(lo - 4, eyeTop - 4, lo - 2, eyeTop - 9); this.line(ro + 4, eyeTop - 4, ro + 2, eyeTop - 9);
+      }
+      if (fx.has("hearts")) for (const h of this.hearts) {
+        if (!h.alive || (h.age > 0.8 && this.frame % 2 === 0)) continue;
+        this.glyph(HEART, fl(h.x), fl(h.y));
+      }
+      if (fx.has("question")) this.glyph(QUESTION, 112, 3 + fl(Math.sin(this.frame * 0.15) * 2));
+      if (fx.has("sparkle")) {
+        const a = fl(this.frame / 5) % 2 === 0;
+        const pts = [a ? lo - 6 : lo - 5, a ? eyeTop + 3 : eyeBottom - 5, a ? ro + 6 : ro + 5, a ? eyeBottom - 4 : eyeTop + 2];
+        for (let k = 0; k < 2; ++k) {
+          const x = pts[k * 2], y = pts[k * 2 + 1];
+          this.line(x - 2, y, x + 2, y); this.line(x, y - 2, x, y + 2);
+        }
+      }
+    }
+    drawZeds() {
+      for (const z of this.zeds) {
+        if (!z.alive || (z.age > 0.8 && this.frame % 2 === 0)) continue;
+        const s = z.age < 0.33 ? 4 : z.age < 0.66 ? 6 : 8, x = fl(z.x), y = fl(z.y) - s;
+        if (x < 0 || x >= W - 4 || y < 0) continue;
+        for (let b = 0; b < (s >= 8 ? 2 : 1); ++b) {
+          this.line(x + b, y, x + s + b, y); this.line(x + s + b, y, x + b, y + s); this.line(x + b, y + s, x + s + b, y + s);
+        }
+      }
+    }
+    render(now = performance.now()) {
+      this.buf.fill(0);
+      const P = this.pack, look = P.looks[this.emotion], lively = !this.still && !this.asleep;
+      let bob = this.asleep ? Math.sin(this.breath) * 2 : -this.mouth * 2;
+      if (lively && look.fx.has("bounce")) bob -= Math.abs(Math.sin(this.frame * 0.18)) * 3;
+      const sway = (lively && look.fx.has("wobble")) ? Math.sin(this.frame * 0.08) * 3 : 0;
+      let cy = H / 2 + P.y + this.gazeY + bob;
+      if (this.talking) cy -= 2;
+      const gx = this.gazeX + this.jitter + sway;
+      let hScale = 1 + this.pop * look.pop;
+      hScale *= 1 - this.squint * 0.4;
+      if (this.asleep) hScale += this.twitch * 2.5;
+      let leftOuter, rightOuter;
+      if (P.cyclops) {
+        const cx = W / 2 + gx;
+        this.drawEye(this.curL, cx, cy, 1, hScale);
+        leftOuter = cx - this.curL.dx - this.curL.w / 2; rightOuter = cx - this.curL.dx + this.curL.w / 2;
+      } else {
+        const lcx = W / 2 - P.gap / 2 - this.curL.w / 2 + gx, rcx = W / 2 + P.gap / 2 + this.curR.w / 2 + gx;
+        this.drawEye(this.curL, lcx, cy, 1, hScale); this.drawEye(this.curR, rcx, cy, -1, hScale);
+        leftOuter = lcx - this.curL.dx - this.curL.w / 2; rightOuter = rcx + this.curR.dx + this.curR.w / 2;
+      }
+      const eyeTop = fl(cy - this.curL.h * hScale / 2), eyeBottom = fl(cy + this.curL.h * hScale / 2);
+      if (this.asleep) this.drawZeds();
+      else {
+        if (!this.still) this.drawFlourishes(leftOuter, rightOuter, eyeTop, eyeBottom, now);
+        this.drawMouth(W / 2 + fl(this.gazeX * 0.5), fl(cy));
+      }
+      return this.buf;
+    }
+  }
+
+  // Paint a frame onto a 128x64 canvas, lit pixels in the OLED's amber.
+  function paint(canvas, buf) {
+    const ctx = canvas._ctx || (canvas._ctx = canvas.getContext("2d"));
+    const img = canvas._img || (canvas._img = ctx.createImageData(W, H));
+    const d = img.data;
+    for (let i = 0; i < W * H; ++i) {
+      const on = buf[i], o = i * 4;
+      d[o] = on ? 242 : 10; d[o + 1] = on ? 180 : 13; d[o + 2] = on ? 92 : 20; d[o + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  function still(pack, emotion) { const s = new Sim(pack, emotion); s.setStill(emotion); return s.render(); }
+
+  return { W, H, EYE_KEYS, EYE_DEF, LIMITS, resolve, Sim, paint, still,
+           setFallback(p) { fallback = p; } };
+})();
+</script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let NAME = "{name}";   // the active personality's name; setRobotName() changes it everywhere on the page
+  function setRobotName(name) {
+    if (!name || name === NAME) return;
+    NAME = name;
+    document.title = name + " · dashboard";
+    document.querySelectorAll("[data-robot-name]").forEach(el => { el.textContent = name; });
+    $("saytext").placeholder = "Words for " + name + "…";
+  }
+  let EMOTIONS = ["neutral", "happy", "sad", "angry", "surprised", "sleepy", "thinking",
+                  "curious", "skeptical", "excited", "love", "confused"];   // replaced by the brain's list
+  const TUNES = [
+    { sec: "listening", key: "VAD_THRESHOLD",    name: "Hears speech above",   help: "lower = more sensitive",       min: 0.1, max: 0.95, step: 0.05 },
+    { sec: "listening", key: "TURN_THRESHOLD",   name: "Sure you're finished", help: "raise if he cuts you off",     min: 0.1, max: 0.95, step: 0.05 },
+    { sec: "listening", key: "TURN_MAX_SILENCE", name: "Longest pause",        help: "seconds he waits when unsure", min: 0.5, max: 6,    step: 0.1, unit: " s" },
+  ];
+  const VOICE = [
+    { sec: "voice", key: "TTS_LEVEL",       name: "Voice level", help: "loudness he's held to",                  min: 0.08, max: 0.40, step: 0.01 },
+    { sec: "voice", key: "TTS_HIGHPASS_HZ", name: "Bass cut",    help: "0 = off · try 250-350 if the speaker rattles", min: 0, max: 600, step: 10, unit: " Hz" },
+    { sec: "voice", key: "TTS_PRESENCE_DB", name: "Presence",    help: "lift above 1.5 kHz for a muffled voice",  min: 0, max: 12, step: 0.5, unit: " dB" },
+  ];
+  let status = {}, server = { running: true, launcher: false }, cfg = null;
+  const dragging = new Set();
+  const history = [];
+
+  // ── helpers ────────────────────────────────────────────────────────────
+  async function post(path, body) {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Rocky-Console": "1" }, body: JSON.stringify(body || {}) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    return j;
+  }
+  const t = $("toast"), popovers = typeof t.showPopover === "function";
+  if (popovers) t.popover = "manual";
+  let toastTimer;
+  function toast(msg, err) {
+    t.textContent = msg; t.classList.toggle("err", !!err);
+    if (popovers) { try { t.hidePopover(); } catch {} t.showPopover(); } else t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => popovers ? t.hidePopover() : t.classList.remove("show"), err ? 3500 : 1800);
+  }
+  async function act(action, body, okMsg) {
+    try { await post("/api/" + action, body); if (okMsg) toast(okMsg); }
+    catch (e) { toast(e.message, true); }
+  }
+  const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+
+  // ── tabs ───────────────────────────────────────────────────────────────
+  const tabs = [...document.querySelectorAll("[role=tab]")];
+  function selectTab(tab, focus) {
+    for (const x of tabs) {
+      const on = x === tab;
+      x.setAttribute("aria-selected", on); x.tabIndex = on ? 0 : -1;
+      $(x.getAttribute("aria-controls")).hidden = !on;
+    }
+    if (focus) tab.focus();
+    placeTabGlow();
+    store.set("rocky-tab", tab.id);
+    if (tab.id === "t-settings") loadSettings();
+    if (tab.id === "t-chars") loadChars();
+    if (tab.id === "t-faces") loadFaces();
+    else if (typeof restoreRobotFace === "function") { $("livemirror").checked = false; restoreRobotFace(); }
+    if (tab.id === "t-log") scrollLog(true);
+    updateStream();
+  }
+  tabs.forEach((tab, i) => {
+    tab.addEventListener("click", () => selectTab(tab));
+    tab.addEventListener("keydown", ev => {
+      const n = { ArrowRight: 1, ArrowLeft: -1 }[ev.key];
+      if (n) { ev.preventDefault(); selectTab(tabs[(i + n + tabs.length) % tabs.length], true); }
+      if (ev.key === "Home") { ev.preventDefault(); selectTab(tabs[0], true); }
+      if (ev.key === "End") { ev.preventDefault(); selectTab(tabs[tabs.length - 1], true); }
+    });
+  });
+  const liveTab = () => !$("p-live").hidden;
+  // the lit pill behind the selected tab slides to it
+  function placeTabGlow() {
+    const tab = tabs.find(x => x.getAttribute("aria-selected") === "true"), g = $("tabglow");
+    if (!tab || !tab.offsetWidth) return;
+    g.style.width = tab.offsetWidth + "px"; g.style.translate = tab.offsetLeft + "px 0";
+  }
+  window.addEventListener("resize", placeTabGlow);
+  document.fonts?.ready.then(placeTabGlow);
+
+  // sliders fill up to their thumb (Chrome and Safari have no ::range-progress)
+  function paintRange(el) {
+    const lo = +el.min || 0, hi = +el.max || 100;
+    el.style.setProperty("--p", ((+el.value - lo) / (hi - lo || 1) * 100) + "%");
+  }
+  const paintRanges = root => (root || document).querySelectorAll("input[type=range]").forEach(paintRange);
+  document.addEventListener("input", ev => { if (ev.target.type === "range") paintRange(ev.target); }, true);
+
+  // ── server control (only when the launcher serves this page) ───────────
+  async function serverAction(what) {
+    for (const b of ["startbtn", "startbtn2", "stopbtn", "restartbtn", "restartbtn2"]) $(b).disabled = true;
+    $("serverpill").className = "pill busy"; $("serverpill").textContent = what === "stop" ? "stopping…" : "starting…";
+    try { const j = await post("/launcher/" + what); toast("Server " + j.result); }
+    catch (e) { toast(e.message, true); }
+    setTimeout(pollServer, 600);
+  }
+  $("startbtn").onclick = $("startbtn2").onclick = () => serverAction("start");
+  $("stopbtn").onclick = () => serverAction("stop");
+  $("restartbtn").onclick = $("restartbtn2").onclick = () => { $("restartnote").hidden = true; serverAction("restart"); };
+  async function pollServer() {
+    try {
+      const r = await fetch("/launcher/state");
+      if (!r.ok) throw new Error("no launcher");
+      const s = await r.json();
+      server = { launcher: true, running: s.running || s.external, external: s.external, uptime: s.uptime_s };
+      setRobotName(s.name);
+    } catch { server = { launcher: false, running: true }; }   // served by the brain itself: it's running
+    $("serverbox").hidden = !server.launcher;
+    $("nolauncher").hidden = server.launcher;
+    $("settingsform").inert = !server.launcher; $("advanced").inert = !server.launcher;
+    const pill = $("serverpill");
+    pill.className = "pill" + (server.running ? " on" : "");
+    pill.textContent = server.running ? (server.external ? "server running (started elsewhere)" : "server running" + (server.uptime != null ? " · " + fmtTime(server.uptime) : "")) : "server stopped";
+    $("startbtn").hidden = server.running; $("stopbtn").hidden = !server.running || server.external; $("restartbtn").hidden = !server.running || server.external;
+    for (const b of ["startbtn", "startbtn2", "stopbtn", "restartbtn", "restartbtn2"]) $(b).disabled = false;
+    $("stoppednote").hidden = server.running; $("livedeck").hidden = !server.running;
+    if (!server.running) showOffline();
+    updateStream();
+  }
+  function fmtTime(s) { return s < 90 ? s + " s" : s < 5400 ? Math.round(s / 60) + " min" : (s / 3600).toFixed(1) + " h"; }
+  setInterval(pollServer, 2000); pollServer();
+
+  // the camera stream only while it can show something (it holds a connection open)
+  let streaming = false;
+  function updateStream() {
+    const want = server.running && liveTab();
+    if (want && !streaming) { $("cam").src = "/stream?" + Date.now(); streaming = true; }
+    if (!want && streaming) { $("cam").removeAttribute("src"); streaming = false; }
+  }
+  $("cam").addEventListener("error", () => { streaming = false; setTimeout(updateStream, 2000); });
+
+  // ── live controls ──────────────────────────────────────────────────────
+  // ── his face, live: the header screen, the face picker and the sleeping face all draw with FaceKit ──
+  // The robot's pack comes from the launcher; without it (the brain's own page) the picker is plain words.
+  const live = { pack: null, avatar: null, sleeper: null, tiles: new Map(), last: 0, emotion: "neutral" };
+  function useLivePack(j) {
+    const rocky = j.packs.find(p => p.id === "rocky"), active = j.packs.find(p => p.id === j.active) || rocky;
+    if (!active?.pack) return;
+    FaceKit.setFallback(rocky?.pack ? FaceKit.resolve(rocky.pack, j.emotions) : null);
+    live.pack = FaceKit.resolve(active.pack, j.emotions);
+    if (live.avatar) live.avatar.setPack(live.pack);
+    else { live.avatar = new FaceKit.Sim(live.pack, live.emotion); mirrorFace(status); FaceKit.paint($("avatar"), live.avatar.render()); }
+    if (live.sleeper) live.sleeper.setPack(live.pack);
+    else { live.sleeper = new FaceKit.Sim(live.pack, "neutral"); live.sleeper.setAsleep(true); FaceKit.paint($("sleepface"), live.sleeper.render()); }
+    faceButtons(EMOTIONS);
+  }
+  async function loadLivePack() {
+    try { const r = await fetch("/launcher/faces"); if (r.ok) useLivePack(await r.json()); } catch {}
+  }
+  function faceButtons(list) {
+    EMOTIONS = list; $("faces").innerHTML = ""; live.tiles.clear();
+    const known = live.pack && list.every(e => live.pack.looks[e]);
+    $("faces").classList.toggle("plain", !known);
+    for (const e of list) {
+      const b = document.createElement("button"); b.type = "button"; b.dataset.emotion = e;
+      if (known) {
+        const c = document.createElement("canvas"); c.width = FaceKit.W; c.height = FaceKit.H; c.setAttribute("aria-hidden", "true");
+        const sim = new FaceKit.Sim(live.pack, e);
+        live.tiles.set(e, { canvas: c, sim, button: b });
+        FaceKit.paint(c, FaceKit.still(live.pack, e));
+        const t = document.createElement("span"); t.textContent = e;
+        b.append(c, t);
+      } else b.textContent = e;
+      b.classList.toggle("active", e === status.emotion);
+      b.onclick = () => act("emotion", { name: e });
+      $("faces").appendChild(b);
+    }
+  }
+  faceButtons(EMOTIONS);
+  loadLivePack();
+  // the face as status says it is right now
+  function mirrorFace(s) {
+    const sim = live.avatar; if (!sim) return;
+    const on = server.running && !!s.robot;
+    if (s.emotion && live.pack?.looks[s.emotion]) { live.emotion = s.emotion; sim.setEmotion(s.emotion); }
+    sim.setAsleep(!on || !s.awake);
+    sim.talking = on && !!s.speaking;
+  }
+  // ── the conversation, word by word: his words appear as his voice says them (status.speech gives his sentences
+  //    and where each sits in the audio; the words of a sentence are spread over it by their length), yours type
+  //    out once he has understood you ──
+  const words = { speech: null, at: 0, heard: null, heardAt: 0, typed: true, said: "", shown: { heard: null, said: null } };
+  const TYPE_MS = 60;   // per word, typing out what you said
+  function takeWords(s) {
+    words.speech = s.speech || null; words.at = performance.now(); words.said = s.last_said || "";
+    if ((s.last_heard || "") !== words.heard) {
+      words.typed = words.heard === null;   // on first load it's old news: no typing
+      words.heard = s.last_heard || ""; words.heardAt = performance.now();
+    }
+  }
+  const split = t => t.split(/\s+/).filter(Boolean);
+  function upto(text, frac) {   // the words of `text` reached `frac` of the way through saying it
+    const ws = split(text), total = text.length || 1;
+    let used = 0, n = 0;
+    for (const w of ws) { if (used / total > frac) break; used += w.length + 1; n++; }
+    return ws.slice(0, n);
+  }
+  function showLine(el, key, before, last, live) {
+    if (words.shown[key] === before + "|" + last + "|" + live) return;
+    words.shown[key] = before + "|" + last + "|" + live;
+    const parts = before ? [document.createTextNode(last ? before + " " : before)] : [];   // nothing at all keeps the "—"
+    if (last) { const b = document.createElement("span"); b.className = "now"; b.textContent = last; parts.push(b); }
+    el.replaceChildren(...parts); el.classList.toggle("typing", live);
+  }
+  function drawWords(now) {
+    const hw = split(words.heard), n = words.typed ? hw.length : Math.min(hw.length, Math.floor((now - words.heardAt) / TYPE_MS) + 1);
+    if (n >= hw.length) words.typed = true;
+    showLine($("heard"), "heard", hw.slice(0, n).join(" "), "", n < hw.length);
+    const sp = words.speech;
+    if (!sp) { showLine($("said"), "said", words.said, "", false); $("saidline").classList.remove("talking"); return; }
+    const pos = Math.min(sp.given, sp.pos + (now - words.at) / 1000), said = [];
+    for (const [text, start, end] of sp.lines) {
+      if (pos < start) break;
+      const stop = end ?? start + Math.max(0.8, text.length / 14);   // still being voiced: a guess at its length
+      said.push(...upto(text, stop > start ? (pos - start) / (stop - start) : 1));
+    }
+    showLine($("said"), "said", said.slice(0, -1).join(" "), said.at(-1) || "", true);
+    $("saidline").classList.add("talking");
+  }
+
+  // a tile moves while it's his face or under the pointer; the rest stay still frames
+  function tileLive(e, t) { return e === live.emotion || t.button.matches(":hover, :focus-visible"); }
+  function liveLoop(now) {
+    requestAnimationFrame(liveLoop);
+    if (document.hidden || now - live.last < 33) return;
+    live.last = now;
+    const sim = live.avatar;
+    if (sim) {
+      if (sim.talking) sim.mouthLevel = Math.max(0, Math.sin(now / 110) * 0.18 + Math.sin(now / 47) * 0.06);
+      sim.step(now); FaceKit.paint($("avatar"), sim.render(now));
+    }
+    if (!liveTab()) return;
+    drawWords(now);
+    if (!$("stoppednote").hidden && live.sleeper) { live.sleeper.step(now); FaceKit.paint($("sleepface"), live.sleeper.render(now)); }
+    for (const [e, t] of live.tiles) {
+      const moving = tileLive(e, t);
+      if (moving) { t.sim.step(now); FaceKit.paint(t.canvas, t.sim.render(now)); t.moved = true; }
+      else if (t.moved) { t.moved = false; FaceKit.paint(t.canvas, FaceKit.still(live.pack, e)); }
+    }
+  }
+  requestAnimationFrame(liveLoop);
+  let headTimer;
+  function headChanged() {
+    $("panv").textContent = $("pan").value + "°"; $("tiltv").textContent = $("tilt").value + "°";
+    clearTimeout(headTimer);
+    headTimer = setTimeout(() => act("head", { pan: +$("pan").value, tilt: +$("tilt").value }), 120);
+  }
+  for (const id of ["pan", "tilt"]) {
+    $(id).addEventListener("input", headChanged);
+    $(id).addEventListener("pointerdown", () => dragging.add(id));
+    $(id).addEventListener("pointerup", () => setTimeout(() => dragging.delete(id), 600));
+    $(id).addEventListener("keydown", () => dragging.add(id));     // arrow keys move it too
+    $(id).addEventListener("keyup", () => setTimeout(() => dragging.delete(id), 600));
+  }
+  $("rotbtn").onclick = () => { const d = ((status.camera_rotate || 0) + 90) % 360; act("camera_rotate", { deg: d }, "Camera turned " + d + "°"); };
+  $("centerbtn").onclick = () => act("center", {}, "Head centered");
+  $("dancebtn").onclick = () => act("dance", {}, "Dancing");
+  $("trackbtn").onclick = () => act("track", { on: !status.tracking_enabled });
+  $("sayform").onsubmit = ev => { ev.preventDefault(); const x = $("saytext").value.trim(); if (x) { act("say", { text: x }, "Saying it"); $("saytext").value = ""; } };
+  $("askbtn").onclick = () => { const x = $("saytext").value.trim(); if (x) { act("ask", { text: x }, "Asked " + NAME); $("saytext").value = ""; } };
+  $("wakebtn").onclick = () => act("sleep", { on: false }, NAME + " is awake");
+  $("sleepbtn").onclick = () => act("sleep", { on: true }, NAME + " is going to sleep");
+  $("focusbtn").onclick = () => status.focus?.active ? act("focus", { on: false }, "Focus session ended")
+    : act("focus", { on: true, minutes: +$("focusmin").value }, "Focus session started");
+
+  // ── focus mode ─────────────────────────────────────────────────────────
+  const mmss = s => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+  const focusHint = $("focusnote").innerHTML;
+  function renderFocus(f) {
+    const st = $("focusstate"), note = $("focusnote"), btn = $("focusbtn");
+    if (!f) return;
+    btn.disabled = !f.available;
+    btn.textContent = f.active ? "End session" : "Start focus";
+    btn.classList.toggle("primary", !f.active);
+    $("focusmin").disabled = f.active;
+    st.textContent = f.active ? mmss(f.left_s) + " left" : "off";
+    st.className = "sonar-state" + (f.active ? " hot" : "");
+    note.classList.toggle("warn", !f.available || !!f.error);
+    if (!f.available) { note.textContent = "Needs OPENAI_API_KEY in server/.env (then restart the server)."; return; }
+    if (f.error) { note.textContent = f.error; return; }
+    if (!f.active) { if (note.innerHTML !== focusHint) note.innerHTML = focusHint; return; }
+    const phone = f.phone == null ? "—" : Math.round(f.phone * 100) + "%";
+    note.textContent = `Phone ${phone} on the last look · picked up ${f.pickups}× · ${f.checks} looks`;
+  }
+
+  // ── what he notices (perception) ───────────────────────────────────────
+  function renderNotices(n) {
+    const st = $("noticestate");
+    if (!n) { st.textContent = "off"; st.className = "sonar-state"; $("nperson").textContent = $("nhands").textContent = ""; return; }
+    if (!n.ready) { st.textContent = n.error ? "unavailable" : "starting…"; st.className = "sonar-state"; $("nperson").textContent = n.error || ""; return; }
+    st.textContent = n.live ? "watching" : "no picture"; st.className = "sonar-state" + (n.live ? " hot" : "");
+    const f = n.face, who = [];
+    if (n.people) {
+      who.push(n.people === 1 ? "one person" : n.people + " people");
+      if (f) {
+        if (f.distance_m != null) who.push(f.distance_m < 0.4 ? "very close" : "about " + (Math.max(0.5, Math.round(f.distance_m * 2) / 2)) + " m away");
+        who.push(f.looking ? "looking at " + NAME : "looking away");
+        if (f.smiling) who.push("smiling");
+        if (f.eyes_closed) who.push("eyes closed");
+        if (f.mouth_open) who.push("mouth open");
+      }
+    }
+    $("nperson").textContent = who.join(", ");
+    $("nhands").textContent = n.waving ? "waving" : "";
+  }
+
+  // ── the hearing strip ──────────────────────────────────────────────────
+  const canvas = $("wave"), ctx = canvas.getContext("2d");
+  function drawWave() {
+    const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+    if (!w) return;
+    if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+    const n = 40, gap = 4, bw = (w - 20) / n - gap, mid = h / 2;
+    ctx.fillStyle = "rgba(242,180,92,.12)"; ctx.fillRect(10, mid, w - 20, 1);
+    for (let i = 0; i < n; i++) {
+      const s = history[history.length - n + i], x = 10 + i * (bw + gap);
+      if (!s) { ctx.fillStyle = "rgba(255,255,255,.06)"; ctx.beginPath(); ctx.roundRect(x, mid - 1, bw, 2, 1); ctx.fill(); continue; }
+      const [level, prob, speaking, voice, out] = s;
+      const amp = speaking && out != null ? out : Math.min(1, Math.sqrt(level) * 3.2), bar = Math.max(2, amp * (h - 18));
+      const heard = voice ?? prob > (status.tuning?.VAD_THRESHOLD ?? 0.5);
+      const rgb = speaking ? "255,74,61" : heard ? "242,180,92" : "138,148,166";
+      // newest bars brightest: the strip reads as a trail moving left
+      const fade = 0.35 + 0.65 * (i / (n - 1));
+      const g = ctx.createLinearGradient(0, mid - bar / 2, 0, mid + bar / 2);
+      g.addColorStop(0, `rgba(${rgb},${0.25 * fade})`); g.addColorStop(0.5, `rgba(${rgb},${(speaking || heard ? 1 : 0.6) * fade})`); g.addColorStop(1, `rgba(${rgb},${0.25 * fade})`);
+      ctx.shadowColor = speaking || heard ? `rgba(${rgb},.7)` : "transparent"; ctx.shadowBlur = speaking || heard ? 10 : 0;
+      ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(x, mid - bar / 2, bw, bar, Math.min(bw / 2, 3)); ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+  }
+  window.addEventListener("resize", drawWave);
+
+  // ── status loop (fast while the Live tab shows, slow otherwise) ─────────
+  function showOffline() {
+    $("link").textContent = "—"; $("state").textContent = server.running ? "—" : "server off"; $("fps").textContent = "—"; $("temp").textContent = "—"; $("mic").textContent = "—";
+    $("link").className = $("fps").className = $("temp").className = "v";
+    $("mood").innerHTML = '<span class="off">' + (server.running ? "no word from the brain" : "server stopped") + "</span>";
+    $("bezel").className = "bezel dozing";
+    mirrorFace({});
+  }
+  async function tick() {
+    if (server.running) {
+      try {
+        const r = await fetch("/status");
+        if (r.ok) render(await r.json()); else showOffline();
+      } catch { showOffline(); }
+    }
+    setTimeout(tick, server.running && liveTab() && !document.hidden ? 200 : 1500);
+  }
+  let pcSeen;   // the last computer action already shown (undefined until the first status)
+  function render(s) {
+    status = s;
+    const pc = s.computer?.last;
+    if (pc && pcSeen !== undefined && pc[1] !== pcSeen) toast(`${NAME} on your computer: ${pc[0]}`);
+    pcSeen = pc ? pc[1] : null;
+    renderFocus(s.focus);
+    const linked = !!s.robot, fresh = s.frame_age_s != null && s.frame_age_s < 3;
+    $("link").textContent = linked ? "on WiFi" : "not connected"; $("link").className = "v" + (linked ? " good" : " warn");
+    $("fps").textContent = fresh ? s.fps + " fps" : "no signal"; $("fps").className = "v" + (fresh ? "" : " warn");
+    $("temp").textContent = s.temperature_c != null ? s.temperature_c.toFixed(1) + " °C" : "—";
+    $("temp").className = "v" + (s.temperature_c > 75 ? " warn" : "");
+    $("state").textContent = s.speaking ? "speaking" : s.thinking ? "thinking" : s.awake ? "awake" : "asleep";
+    $("mic").textContent = !s.listening ? "off" : s.mic === "robot" ? "robot mic"
+      : (s.mic_device || "computer mic") + (s.mic_missing ? ` (${s.mic_missing} unplugged)` : "");
+    $("awakenote").textContent = s.awake ? "dozes off in " + Math.max(0, Math.round(s.awake_for)) + " s" : "asleep · say hey " + NAME;
+    $("viewport").classList.toggle("dark", !fresh); $("viewport").classList.toggle("speaking", !!s.speaking);
+    $("framenote").textContent = fresh ? "" : "no fresh frame";
+    const pan = s.pan ?? 0, tilt = s.tilt ?? 0;
+    $("rpan").textContent = "pan " + Math.round(pan) + "°"; $("rtilt").textContent = "tilt " + Math.round(tilt) + "°";
+    $("rtrack").textContent = s.tracking ? "face locked" : s.tracking_enabled ? "looking for a face" : s.head_held ? "holding" : "not tracking";
+    $("rtrack").className = s.tracking ? "" : "off";
+    $("headnote").textContent = s.head_held ? "holding a pose" : "";
+    if (!dragging.has("pan")) { $("pan").value = Math.round(pan); $("panv").textContent = Math.round(pan) + "°"; }
+    if (!dragging.has("tilt")) { $("tilt").value = Math.round(tilt); $("tiltv").textContent = Math.round(tilt) + "°"; }
+    if (s.camera_rotate != null) $("rotv").textContent = s.camera_rotate + "°";
+    if (s.limits) { $("pan").min = -s.limits.pan; $("pan").max = s.limits.pan; $("tilt").min = s.limits.tilt[0]; $("tilt").max = s.limits.tilt[1]; }
+    paintRange($("pan")); paintRange($("tilt"));
+    // the camera HUD: pan along the bottom, tilt up the side, the reticle locks on a face
+    const pl = s.limits?.pan || 95, [t0, t1] = s.limits?.tilt || [-85, 85];
+    $("pangauge").style.left = Math.min(100, Math.max(0, (pan + pl) / (2 * pl) * 100)) + "%";
+    $("tiltgauge").style.top = Math.min(100, Math.max(0, (t1 - tilt) / (t1 - t0 || 1) * 100)) + "%";
+    $("viewport").classList.toggle("locked", !!s.tracking);
+    $("hudfps").textContent = fresh ? s.fps + " fps" : "";
+    // the header: his face as it is now, and a word on what he's up to
+    const doing = !linked ? "not connected" : s.speaking ? "talking" : s.thinking ? "thinking" : s.hearing ? "listening to you" : s.awake ? "awake" : "asleep";
+    $("mood").textContent = linked && s.awake && s.emotion ? `${s.emotion} · ${doing}` : doing;
+    $("bezel").className = "bezel" + (s.speaking ? " speaking" : !linked || !s.awake ? " dozing" : "");
+    mirrorFace(s);
+    if (s.emotions && s.emotions.join() !== EMOTIONS.join()) faceButtons(s.emotions);
+    for (const b of $("faces").children) b.classList.toggle("active", b.dataset.emotion === s.emotion);
+    $("trackbtn").classList.toggle("active", !!s.tracking_enabled); $("trackbtn").textContent = s.tracking_enabled ? "Stop following" : "Follow my face";
+    takeWords(s);
+    // each bar sums up the time since the last look: its loudest moment, and gold if any of it was a voice to him
+    // (while he talks the mic is muted, so his bars are his own voice's loudness instead)
+    history.push([s.level_recent ?? s.level ?? 0, s.speech_recent ?? s.speech_prob ?? 0, !!s.speaking, s.voice_recent, s.speech?.level]);
+    if (history.length > 60) history.shift();
+    const hs = $("hearstate");
+    const focusing = !!s.focus?.active;   // a focus session: he hears, but answers nothing
+    hs.textContent = s.speaking ? "speaking" : !s.listening ? "ears off" : focusing ? "focus · not answering"
+      : s.hearing ? "hearing you" : "listening";
+    hs.className = "sonar-state" + (s.speaking ? " astro" : s.hearing && !focusing ? " hot" : "");
+    renderNotices(s.notices);
+    if (liveTab()) drawWave();
+  }
+  tick();
+
+  // ── settings ───────────────────────────────────────────────────────────
+  const form = $("settingsform");
+  function sliderRow(into, d) {
+    const id = "tune-" + d.key, wrap = document.createElement("div"); wrap.className = "set";
+    wrap.innerHTML = `<label class="k" for="${id}">${d.name}</label>
+      <div class="slide"><input type="range" id="${id}" name="${d.sec}.${d.key}" min="${d.min}" max="${d.max}" step="${d.step}"><output for="${id}"></output></div>
+      <p class="hint" style="margin:0">${d.help}</p>`;
+    const out = wrap.querySelector("output"); out.dataset.unit = d.unit || ""; out.dataset.fixed = d.step >= 1 ? "0" : d.step < 0.1 ? "2" : "1";
+    into.appendChild(wrap);
+  }
+  TUNES.forEach(d => sliderRow($("tunes"), d)); VOICE.forEach(d => sliderRow($("voicetunes"), d));
+  const outputFor = inp => inp.parentElement.querySelector("output");
+  function showOutput(inp) {
+    const o = outputFor(inp); if (!o) return;
+    const f = o.dataset.fixed; o.textContent = (f != null ? (+inp.value).toFixed(+f) : inp.value) + (o.dataset.unit || "");
+  }
+  function controls() { return [...document.querySelectorAll("#settingsform [name], #advanced [name]")]; }
+
+  function fill(s) {
+    cfg.settings = s;
+    for (const el of controls()) {
+      const [sec, key] = el.name.split(".");
+      let v = s[sec]?.[key];
+      if (v == null && cfg.config_defaults && key in cfg.config_defaults) v = cfg.config_defaults[key];
+      if (el.type === "radio") el.checked = String(v) === el.value;
+      else if (el.type === "checkbox") el.checked = !!v;
+      else if (document.activeElement !== el) el.value = v ?? "";
+      if (el.type === "range") { showOutput(el); paintRange(el); }
+    }
+    fillMic(s);
+    const w = s.weather;
+    $("here").textContent = w.lat != null ? (w.location || `${w.lat.toFixed(2)}, ${w.lon.toFixed(2)}`) : "not set: no weather on the clock";
+    $("placeclear").hidden = w.lat == null;
+  }
+  // the mic picker: Automatic, the robot's, or one of this computer's inputs by name (listed by the launcher)
+  let mics = [], micsError = "";
+  const micValue = r => r.mic === "computer" ? "dev:" + (r.mic_device || "") : r.mic;
+  function fillMic(s) {
+    const sel = $("micsel"), r = s.rocky, want = micValue(r);
+    const opts = [["auto", "Automatic"], ["robot", "The robot's mic"]];
+    const def = mics.find(m => m.default);
+    opts.push(["dev:", "This computer's default" + (def ? ` (${def.name})` : "")]);
+    for (const m of mics) opts.push(["dev:" + m.name, m.name]);
+    if (want.startsWith("dev:") && want !== "dev:" && !mics.some(m => "dev:" + m.name === want))
+      opts.push([want, `${want.slice(4)} (not plugged in)`]);
+    sel.replaceChildren(...opts.map(([v, t]) => new Option(t, v)));
+    sel.value = want;
+    $("michint").textContent = micsError ? `Couldn't list this computer's mics: ${micsError}`
+      : "Automatic = the robot's mic while it's connected, otherwise this computer's. A mic that's unplugged counts as Automatic until it's back.";
+  }
+  async function loadMics() {
+    try {
+      const j = await (await fetch("/launcher/mics")).json();
+      mics = j.mics || []; micsError = j.error || "";
+    } catch { mics = []; micsError = "the launcher didn't answer"; }
+    if (cfg?.settings) fillMic(cfg.settings);
+  }
+  $("micsel").onchange = ev => {
+    const v = ev.target.value;
+    save({ rocky: v.startsWith("dev:") ? { mic: "computer", mic_device: v.slice(4) } : { mic: v, mic_device: "" } }, "rocky");
+  };
+  $("micscan").onclick = () => loadMics().then(() => toast(mics.length ? `Found ${mics.length} mic${mics.length > 1 ? "s" : ""} on this computer` : "No mics found on this computer"));
+
+  async function loadSettings() {
+    try {
+      const r = await fetch("/launcher/settings");
+      if (!r.ok) throw new Error();
+      cfg = await r.json();
+      $("comptz").textContent = cfg.computer_timezone;
+      $("spotifynote").textContent = cfg.spotify_key
+        ? "Key found: he can find a song, artist, album or playlist and play it, and tell you what's playing."
+        : "He can tell you what's playing and play, pause or skip. To play songs by name, add a Spotify key to server/.env (SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET; the README shows how) and restart the server. Until then he opens Spotify's search for you to pick.";
+      if (cfg.mac === false) {
+        $("pcplatform").textContent = "This computer isn't a Mac, so here he can only search the web and open websites. Apps, music, volume and Shortcuts need a Mac for now; docs/computer-control-windows.md in the project folder has ideas for adding them on Windows.";
+        $("pcplatform").classList.add("warn");
+        $("spotifynote").textContent = "Spotify and Apple Music control need a Mac for now.";
+      }
+      fill(cfg.settings);
+      loadMics();
+    } catch { /* not served by the launcher: the notice says so */ }
+  }
+  function valueOf(el) {
+    const [sec, key] = el.name.split(".");
+    const kind = cfg?.schema?.[sec]?.[key]?.kind;
+    if (el.type === "checkbox") return el.checked;
+    if (el.type === "radio") { if (el.value === "true") return true; if (el.value === "false") return false; }
+    if (kind === "int" || kind === "float" || (kind === "choice" && /^\d+$/.test(el.value))) return +el.value;
+    return el.value;
+  }
+  const savedTimers = {};
+  async function save(changes, section) {
+    const tag = document.querySelector(`[data-saved="${section}"]`);
+    try {
+      const j = await post("/launcher/settings", { changes });
+      fill(j.settings);
+      if (tag) { tag.textContent = j.applied_live || !server.running ? "saved" : "saved · applies when the server runs"; tag.classList.add("ok");
+        clearTimeout(savedTimers[section]); savedTimers[section] = setTimeout(() => { tag.textContent = ""; tag.classList.remove("ok"); }, 2500); }
+      if (changes.rocky && "human_name" in changes.rocky && server.running) $("restartnote").hidden = false;
+    } catch (e) { toast(e.message, true); loadSettings(); }
+  }
+  const debounce = {};
+  function changed(el, delay) {
+    if (!el.name) return;
+    const [sec, key] = el.name.split(".");
+    if (el.type === "range") showOutput(el);
+    clearTimeout(debounce[el.name]);
+    debounce[el.name] = setTimeout(() => save({ [sec]: { [key]: valueOf(el) } }, sec), delay);
+  }
+  form.addEventListener("input", ev => { if (ev.target.type === "range") changed(ev.target, 350); });
+  form.addEventListener("change", ev => { if (ev.target.type !== "range") changed(ev.target, 0); });
+  form.addEventListener("submit", ev => ev.preventDefault());
+  $("advanced").addEventListener("input", ev => changed(ev.target, 350));
+  $("advreset").onclick = () => save({ listening: { VAD_THRESHOLD: null, TURN_THRESHOLD: null, TURN_MAX_SILENCE: null },
+                                       voice: { TTS_LEVEL: null, TTS_HIGHPASS_HZ: null, TTS_PRESENCE_DB: null } }, "listening")
+                                 .then(() => toast("Back to the defaults · restart the server to apply them"));
+  $("tzauto").onclick = () => { $("tz").value = ""; save({ clock: { timezone: "" } }, "clock"); };
+
+  // weather location: search Open-Meteo's places (through the launcher), pick one
+  async function searchPlaces() {
+    const q = $("placeq").value.trim(), list = $("results");
+    list.innerHTML = "";
+    if (!q) return;
+    list.innerHTML = '<li class="hint">Searching…</li>';
+    try {
+      const r = await fetch("/launcher/geocode?q=" + encodeURIComponent(q)), j = await r.json();
+      if (!r.ok) throw new Error(j.error || "search failed");
+      list.innerHTML = "";
+      if (!j.results.length) { list.innerHTML = '<li class="hint">No places found. Try another spelling.</li>'; return; }
+      for (const p of j.results) {
+        const li = document.createElement("li"), b = document.createElement("button");
+        b.type = "button"; b.textContent = p.label + (p.timezone ? "  ·  " + p.timezone : "");
+        b.onclick = () => {
+          list.innerHTML = ""; $("placeq").value = "";
+          const changes = { weather: { location: p.label, lat: p.lat, lon: p.lon, show: true } };
+          if (p.country_code && p.country_code !== "US") changes.weather.units = "c";
+          save(changes, "weather").then(() => {
+            const tzNow = cfg.settings.clock.timezone || cfg.computer_timezone;
+            if (p.timezone && p.timezone !== tzNow) toast(`Clock time zone is ${tzNow}; set it to ${p.timezone} under Clock screen if you moved`);
+          });
+        };
+        li.appendChild(b); list.appendChild(li);
+      }
+    } catch (e) { list.innerHTML = ""; toast(e.message, true); }
+  }
+  $("placego").onclick = searchPlaces;
+  $("placeq").addEventListener("keydown", ev => { if (ev.key === "Enter" && !ev.isComposing) { ev.preventDefault(); searchPlaces(); } });
+  $("placeclear").onclick = () => save({ weather: { location: "", lat: null, lon: null } }, "weather");
+
+  // computer: pick Shortcuts he may run from the ones on this Mac
+  $("pclist").onclick = async () => {
+    const list = $("pcshortcuts");
+    list.innerHTML = '<li class="hint">Looking…</li>';
+    try {
+      const r = await fetch("/launcher/shortcuts"), j = await r.json();
+      if (!r.ok) throw new Error(j.error || "couldn't list your shortcuts");
+      const have = new Set(($("pcsc").value || "").split(/[,\n]/).map(n => n.trim().toLowerCase()).filter(Boolean));
+      const left = j.shortcuts.filter(n => !have.has(n.toLowerCase()));
+      list.innerHTML = "";
+      if (!left.length) { list.innerHTML = `<li class="hint">${j.error || (j.shortcuts.length ? "All of them are on the list." : "No shortcuts yet: make one in the Shortcuts app.")}</li>`; return; }
+      for (const n of left) {
+        const li = document.createElement("li"), b = document.createElement("button");
+        b.type = "button"; b.textContent = "+ " + n;
+        b.onclick = () => {
+          const now = ($("pcsc").value || "").trim();
+          $("pcsc").value = now ? `${now}, ${n}` : n;
+          li.remove();
+          save({ computer: { shortcuts: $("pcsc").value } }, "computer");
+        };
+        li.appendChild(b); list.appendChild(li);
+      }
+    } catch (e) { list.innerHTML = ""; toast(e.message, true); }
+  };
+
+  // ── faces ──────────────────────────────────────────────────────────────
+  const FIELDS = [
+    ["w", "Width", 4, 120, 1, ""], ["h", "Height", 2, 64, 1, ""],
+    ["rt", "Top rounding", 0, 32, 1, ""], ["rb", "Bottom rounding", 0, 32, 1, ""],
+    ["st", "Top slant", -30, 30, 1, "+ tips the inner corner down (angry), − the outer (sad)"],
+    ["sb", "Bottom slant", -30, 30, 1, "+ lifts the inner corner"],
+    ["lid", "Upper lid", 0, 40, 1, "droops from the top (sleepy)"],
+    ["cheek", "Cheek", 0, 40, 1, "pushes up from below (happy)"],
+    ["dx", "Spread", -30, 30, 1, "+ moves the eye outward"], ["dy", "Up / down", -30, 30, 1, "+ = lower"],
+  ];
+  const LOOK_FIELDS = [
+    ["gx", "Looks left / right", -20, 20, 1], ["gy", "Looks up / down", -20, 20, 1],
+    ["pop", "Pop when it arrives", 0, 0.6, 0.02], ["smile", "Resting mouth (frown − / smile +)", -6, 6, 0.5],
+  ];
+  const FX_LABELS = { blush: "Blush", tear: "Tear", dots: "Thinking dots", pop: "“!”", steam: "Steam", shake: "Shake",
+                      hearts: "Hearts", question: "“?”", sparkle: "Sparkles", bounce: "Bounce", wobble: "Sway" };
+  const fstate = { list: [], active: "rocky", emotions: [], fxNames: [], sel: null, emo: "neutral",
+                   draft: null, dirty: false, eyeMode: "both", previewed: false, loaded: false };
+  const sims = [];   // [{canvas, sim}] drawn while the Faces tab shows
+  const facesTab = () => !$("p-faces").hidden;
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const packOf = id => fstate.list.find(p => p.id === id);
+  const editable = () => !!fstate.sel && !packOf(fstate.sel)?.builtin;
+  const current = () => fstate.draft || packOf(fstate.sel)?.pack;
+  const label = e => e === "asleep" ? "Asleep" : e === "talking" ? "Talking" : e[0].toUpperCase() + e.slice(1);
+
+  function makeSim(resolved, emo, talking) {
+    const s = new FaceKit.Sim(resolved, emo === "asleep" || emo === "talking" ? "neutral" : emo);
+    if (emo === "asleep") s.setAsleep(true);
+    if (talking || emo === "talking") s.talkDemo = true;
+    return s;
+  }
+  function addSim(canvas, sim, group) { sims.push({ canvas, sim, group }); FaceKit.paint(canvas, sim.render()); }
+  function dropSims(group) { for (let i = sims.length - 1; i >= 0; --i) if (sims[i].group === group) sims.splice(i, 1); }
+  let lastTick = 0;
+  function faceLoop(now) {
+    requestAnimationFrame(faceLoop);
+    if (!facesTab() || document.hidden || now - lastTick < 33) return;
+    lastTick = now;
+    for (const { canvas, sim } of sims) {
+      if (sim.talkDemo) { sim.talking = true; sim.mouthLevel = Math.max(0, Math.sin(now / 110) * 0.18 + Math.sin(now / 47) * 0.06); }
+      sim.step(now);
+      FaceKit.paint(canvas, sim.render(now));
+    }
+  }
+  requestAnimationFrame(faceLoop);
+  function oled(cls, name) {
+    const c = document.createElement("canvas"); c.width = FaceKit.W; c.height = FaceKit.H;
+    c.className = "oled" + (cls ? " " + cls : ""); c.setAttribute("role", "img"); c.setAttribute("aria-label", name);
+    return c;
+  }
+
+  async function loadFaces(selectId) {
+    try {
+      const r = await fetch("/launcher/faces");
+      if (!r.ok) throw new Error();
+      const j = await r.json();
+      fstate.list = j.packs.filter(p => p.pack); fstate.active = j.active; fstate.emotions = j.emotions; fstate.fxNames = j.fx;
+      useLivePack(j);   // the header face and the Live picker follow the pack in use
+      const rocky = packOf("rocky");
+      FaceKit.setFallback(null);
+      if (rocky) FaceKit.setFallback(FaceKit.resolve(rocky.pack, fstate.emotions));
+      fstate.loaded = true;
+      $("facesnolauncher").hidden = true; $("facesbody").hidden = false;
+      renderPackList();
+      selectPack(selectId || (packOf(fstate.sel) ? fstate.sel : fstate.active), true);
+    } catch {
+      $("facesnolauncher").hidden = false; $("facesbody").hidden = true;
+    }
+  }
+  function renderPackList() {
+    dropSims("packs");
+    const box = $("packs"); box.innerHTML = "";
+    for (const p of fstate.list) {
+      const b = document.createElement("button"); b.type = "button"; b.className = "packcard"; b.dataset.id = p.id;
+      b.setAttribute("aria-pressed", p.id === fstate.sel);
+      const c = oled("", p.pack.name + " face pack");
+      const name = document.createElement("span"); name.className = "pname"; name.textContent = p.pack.name;
+      const tags = document.createElement("span"); tags.className = "ptags";
+      tags.textContent = [p.id === fstate.active ? "In use" : "", p.builtin ? "Built-in" : "Yours"].filter(Boolean).join(" · ");
+      if (p.id === fstate.active) tags.classList.add("on");
+      b.append(c, name, tags);
+      b.onclick = () => selectPack(p.id);
+      box.appendChild(b);
+      addSim(c, makeSim(FaceKit.resolve(p.pack, fstate.emotions), "neutral"), "packs");
+    }
+  }
+  function confirmDiscard() { return !fstate.dirty || confirm("Throw away your unsaved changes to this pack?"); }
+  function selectPack(id, keepEmo) {
+    if (id !== fstate.sel && !confirmDiscard()) return;
+    if (!packOf(id)) id = fstate.list[0]?.id;
+    const p = packOf(id); if (!p) return;
+    fstate.sel = id; fstate.draft = p.builtin ? null : clone(p.pack); fstate.dirty = false;
+    if (!keepEmo) fstate.emo = "neutral";
+    for (const b of $("packs").children) b.setAttribute("aria-pressed", b.dataset.id === id);
+    $("packtitle").textContent = p.pack.name; $("packauthor").textContent = p.pack.author ? "by " + p.pack.author : "";
+    $("packdesc").textContent = p.pack.description || "";
+    $("packuse").disabled = id === fstate.active; $("packuse").textContent = id === fstate.active ? "In use" : "Use this pack";
+    $("packdelete").hidden = p.builtin; $("packdup").textContent = p.builtin ? "Duplicate to edit" : "Duplicate";
+    $("builtinnote").hidden = !p.builtin; $("editor").hidden = p.builtin;
+    renderGallery(); selectEmotion(fstate.emo); fillPackFields(); markDirty(false);
+  }
+  function resolvedNow() { return FaceKit.resolve(current(), fstate.emotions); }
+  function renderGallery() {
+    dropSims("gallery");
+    const box = $("gallery"); box.innerHTML = "";
+    const res = resolvedNow();
+    for (const e of [...fstate.emotions, "asleep", "talking"]) {
+      const b = document.createElement("button"); b.type = "button"; b.className = "facecard"; b.dataset.emo = e;
+      b.setAttribute("aria-pressed", e === fstate.emo);
+      const c = oled("", label(e));
+      const t = document.createElement("span"); t.textContent = label(e);
+      b.append(c, t); b.onclick = () => selectEmotion(e);
+      box.appendChild(b);
+      addSim(c, makeSim(res, e), "gallery");
+    }
+  }
+  function refreshSims() {   // the pack changed (an edit): every preview picks it up, mid-animation
+    const res = resolvedNow();
+    for (const s of sims) if (s.group !== "packs") s.sim.setPack(res);
+    const card = [...$("packs").children].find(b => b.dataset.id === fstate.sel);
+    const ps = sims.find(s => s.group === "packs" && s.canvas.parentElement === card);
+    if (ps) ps.sim.setPack(res);
+  }
+  function selectEmotion(e) {
+    fstate.emo = e;
+    for (const b of $("gallery").children) b.setAttribute("aria-pressed", b.dataset.emo === e);
+    $("seltitle").textContent = label(e);
+    dropSims("big");
+    addSim($("bigface"), makeSim(resolvedNow(), e), "big");
+    $("bigface").setAttribute("aria-label", `${packOf(fstate.sel)?.pack.name} pack, ${label(e)}`);
+    renderEditor();
+    if ($("livemirror").checked) mirrorSoon();
+  }
+
+  // ── the editor (your own packs) ──
+  function entry(make) {   // the selected emotion's entry in the draft (filled in from what it shows, if missing)
+    const d = fstate.draft;
+    if (fstate.emo === "asleep") { if (make) d.asleep = d.asleep || {}; return d.asleep || {}; }
+    d.emotions = d.emotions || {};
+    let e = d.emotions[fstate.emo];
+    if (!e && make) {
+      const look = resolvedNow().looks[fstate.emo];
+      e = {}; for (const k of FaceKit.EYE_KEYS) e[k] = look.l[k];
+      const right = {}; for (const k of FaceKit.EYE_KEYS) if (look.r[k] !== look.l[k]) right[k] = look.r[k];
+      if (Object.keys(right).length) e.right = right;
+      if (look.fx.size) e.fx = [...look.fx];
+      if (look.gazeX || look.gazeY) e.gaze = [look.gazeX, look.gazeY];
+      if (look.pop !== 0.12) e.pop = look.pop;
+      if (look.smile) e.smile = look.smile;
+      d.emotions[fstate.emo] = e;
+    }
+    return e || {};
+  }
+  function eyeValue(k) {
+    const look = resolvedNow(), sel = fstate.emo;
+    if (sel === "asleep") return look.asleep[k];
+    const L = look.looks[sel];
+    return fstate.eyeMode === "right" ? L.r[k] : L.l[k];
+  }
+  function setEye(k, v) {
+    const e = entry(true);
+    if (fstate.emo === "asleep" || fstate.eyeMode === "both") {
+      e[k] = v;
+      if (e.right) { delete e.right[k]; if (!Object.keys(e.right).length) delete e.right; }
+    } else if (fstate.eyeMode === "left") {
+      const look = resolvedNow().looks[fstate.emo];
+      e.right = e.right || {};
+      if (!(k in e.right)) e.right[k] = look.r[k];   // keep the right eye as it is
+      e[k] = v;
+    } else { e.right = e.right || {}; e.right[k] = v; }
+    faceEdited();
+  }
+  function sliderRowEl(id, name, min, max, step, value, hint, onInput) {
+    const wrap = document.createElement("div"); wrap.className = "set";
+    wrap.innerHTML = `<label class="k" for="${id}"></label><div class="slide"><input type="range" id="${id}" min="${min}" max="${max}" step="${step}"><output for="${id}"></output></div>`;
+    wrap.querySelector("label").textContent = name;
+    if (hint) { const p = document.createElement("p"); p.className = "hint"; p.style.margin = "0"; p.textContent = hint; wrap.appendChild(p); }
+    const inp = wrap.querySelector("input"), out = wrap.querySelector("output");
+    const show = () => { out.textContent = step < 1 ? (+inp.value).toFixed(2).replace(/0$/, "") : inp.value; };
+    inp.value = value; show(); paintRange(inp);
+    inp.addEventListener("input", () => { show(); onInput(+inp.value); });
+    return wrap;
+  }
+  function renderEditor() {
+    if (!editable()) return;
+    const sel = fstate.emo, cyc = !!current().cyclops;
+    $("talknote").hidden = sel !== "talking";
+    $("eyemode").hidden = sel === "asleep" || sel === "talking" || cyc;
+    $("lookfields").hidden = $("fxset").hidden = sel === "asleep" || sel === "talking";
+    const sl = $("eyesliders"); sl.innerHTML = ""; sl.hidden = sel === "talking";
+    if (sel === "talking") return;
+    for (const [k, name, min, max, step, hint] of FIELDS) {
+      if (cyc && k === "dx") continue;
+      sl.appendChild(sliderRowEl("fe-" + k, name, min, max, step, eyeValue(k), hint, v => setEye(k, v)));
+    }
+    if (sel === "asleep") return;
+    const look = resolvedNow().looks[sel];
+    const fxb = $("fxboxes"); fxb.innerHTML = "";
+    for (const f of fstate.fxNames) {
+      const l = document.createElement("label"); const c = document.createElement("input");
+      c.type = "checkbox"; c.checked = look.fx.has(f);
+      c.onchange = () => {
+        const e = entry(true), set = new Set(e.fx || []);
+        c.checked ? set.add(f) : set.delete(f);
+        if (set.size) e.fx = fstate.fxNames.filter(n => set.has(n)); else delete e.fx;
+        faceEdited();
+      };
+      l.append(c, " " + (FX_LABELS[f] || f)); fxb.appendChild(l);
+    }
+    const lf = $("lookfields"); lf.innerHTML = "";
+    const vals = { gx: look.gazeX, gy: look.gazeY, pop: look.pop, smile: look.smile };
+    for (const [k, name, min, max, step] of LOOK_FIELDS) {
+      if (k === "smile" && current().mouth !== "always") continue;
+      lf.appendChild(sliderRowEl("fl-" + k, name, min, max, step, vals[k], "", v => {
+        const e = entry(true);
+        if (k === "gx" || k === "gy") { const g = e.gaze || [look.gazeX, look.gazeY]; g[k === "gx" ? 0 : 1] = v; e.gaze = g; }
+        else e[k] = v;
+        faceEdited();
+      }));
+    }
+  }
+  for (const r of document.querySelectorAll("[name=eyemode]")) r.onchange = () => { fstate.eyeMode = r.value; renderEditor(); };
+  function fillPackFields() {
+    if (!editable()) return;
+    const p = current();
+    $("pk-name").value = p.name || ""; $("pk-author").value = p.author || ""; $("pk-desc").value = p.description || "";
+    $("pk-gap").value = p.gap ?? 16; $("pk-y").value = p.y ?? 0;
+    $("pk-gapv").textContent = $("pk-gap").value; $("pk-yv").textContent = $("pk-y").value;
+    paintRange($("pk-gap")); paintRange($("pk-y"));
+    $("pk-cyclops").checked = !!p.cyclops; $("pk-outline").checked = !!p.outline; $("pk-glint").checked = p.glint !== false;
+    for (const r of document.querySelectorAll("[name=pk-mouth]")) r.checked = r.value === (p.mouth || "talk");
+  }
+  function packField(fn) { return () => { fn(fstate.draft); faceEdited(); }; }
+  $("pk-name").oninput = packField(d => d.name = $("pk-name").value);
+  $("pk-author").oninput = packField(d => d.author = $("pk-author").value);
+  $("pk-desc").oninput = packField(d => d.description = $("pk-desc").value);
+  $("pk-gap").oninput = packField(d => { d.gap = +$("pk-gap").value; $("pk-gapv").textContent = d.gap; });
+  $("pk-y").oninput = packField(d => { d.y = +$("pk-y").value; $("pk-yv").textContent = d.y; });
+  $("pk-cyclops").onchange = packField(d => { d.cyclops = $("pk-cyclops").checked; renderEditor(); });
+  $("pk-outline").onchange = packField(d => d.outline = $("pk-outline").checked);
+  $("pk-glint").onchange = packField(d => d.glint = $("pk-glint").checked);
+  for (const r of document.querySelectorAll("[name=pk-mouth]")) r.onchange = packField(d => { d.mouth = r.value; renderEditor(); });
+
+  function markDirty(on) {
+    fstate.dirty = on;
+    $("facesave").disabled = $("facerevert").disabled = !on;
+    $("facesaved").textContent = on ? "unsaved changes" : ""; $("facesaved").classList.remove("ok");
+  }
+  function faceEdited() { markDirty(true); refreshSims(); if ($("livemirror").checked) mirrorSoon(); }
+  let mirrorTimer;
+  function mirrorSoon() { clearTimeout(mirrorTimer); mirrorTimer = setTimeout(() => tryOn(true), 250); }
+  async function tryOn(quiet) {
+    const emo = fstate.emotions.includes(fstate.emo) ? fstate.emo : "neutral";
+    try { await post("/api/face_preview", { pack: current(), emotion: emo }); fstate.previewed = true; if (!quiet) toast(`Showing ${label(emo)} on ${NAME}`); }
+    catch (e) { if (!quiet || !/stopped|connected/.test(e.message)) toast(e.message, true); }
+  }
+  function restoreRobotFace() { if (fstate.previewed) { fstate.previewed = false; post("/api/face_restore").catch(() => {}); } }
+  $("tryon").onclick = () => tryOn(false);
+  $("livemirror").onchange = () => { if ($("livemirror").checked) tryOn(true); else restoreRobotFace(); };
+
+  $("facesave").onclick = async () => {
+    try {
+      const j = await post("/launcher/faces/save", { id: fstate.sel, pack: fstate.draft });
+      fstate.dirty = false; await loadFaces(j.id);
+      $("facesaved").textContent = j.applied_live ? "saved · on Rocky now" : "saved"; $("facesaved").classList.add("ok");
+    } catch (e) { toast(e.message, true); }
+  };
+  $("facerevert").onclick = () => { fstate.draft = clone(packOf(fstate.sel).pack); markDirty(false); refreshSims(); renderEditor(); fillPackFields(); if ($("livemirror").checked) mirrorSoon(); };
+  $("packuse").onclick = async () => {
+    if (!confirmDiscard()) return;
+    try { await post("/launcher/settings", { changes: { face: { pack: fstate.sel } } }); fstate.dirty = false; fstate.previewed = false; await loadFaces(fstate.sel); toast(`${NAME} is using ${packOf(fstate.sel).pack.name}`); }
+    catch (e) { toast(e.message, true); }
+  };
+  $("packdup").onclick = async () => {
+    if (!confirmDiscard()) return;
+    const p = clone(current()); p.name = (p.name + " copy").slice(0, 24); p.author = "";
+    try { const j = await post("/launcher/faces/save", { pack: p }); fstate.dirty = false; await loadFaces(j.id); toast("Copied: edit away"); }
+    catch (e) { toast(e.message, true); }
+  };
+  $("packdelete").onclick = async () => {
+    if (!confirm(`Delete the pack “${packOf(fstate.sel).pack.name}”? This can't be undone.`)) return;
+    try { await post("/launcher/faces/delete", { id: fstate.sel }); fstate.dirty = false; fstate.sel = null; await loadFaces(); toast("Deleted"); }
+    catch (e) { toast(e.message, true); }
+  };
+  $("packexport").onclick = () => {
+    const p = current(), blob = new Blob([JSON.stringify(p, null, 2) + "\n"], { type: "application/json" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = (fstate.sel.replace(/^custom\//, "") || "face-pack") + ".json"; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  $("packimport").onchange = async () => {
+    const f = $("packimport").files[0]; $("packimport").value = "";
+    if (!f || !confirmDiscard()) return;
+    try {
+      const p = JSON.parse(await f.text());
+      const j = await post("/launcher/faces/save", { pack: p });
+      fstate.dirty = false; await loadFaces(j.id); toast(`Imported ${packOf(j.id)?.pack.name || "the pack"}`);
+    } catch (e) { toast(e instanceof SyntaxError ? "That file isn't a face pack (bad JSON)" : e.message, true); }
+  };
+  window.addEventListener("beforeunload", ev => { if (fstate.dirty) { ev.preventDefault(); ev.returnValue = ""; } });
+
+  // ── personalities ──────────────────────────────────────────────────────
+  const cstate = { list: [], active: "rocky", sel: "rocky", isNew: false, saved: null, dirty: false, external: false };
+  const charOf = id => cstate.list.find(c => c.id === id);
+  const LINE_KEYS = ["wake", "sleep", "track_on", "track_off"];
+  const MODEL_NAMES = { "": "S2.1 Pro", "drama-3": "Drama 3" };
+  async function loadChars(selectId) {
+    try {
+      const r = await fetch("/launcher/characters");
+      if (!r.ok) throw new Error();
+      const j = await r.json();
+      cstate.list = j.characters.filter(c => c.character); cstate.active = j.active; cstate.external = j.external;
+      $("charsnolauncher").hidden = true; $("charsbody").hidden = false;
+      renderCharList();
+      if (!cstate.isNew || selectId) selectChar(selectId || (charOf(cstate.sel) ? cstate.sel : cstate.active), true);
+    } catch {
+      $("charsnolauncher").hidden = false; $("charsbody").hidden = true;
+    }
+  }
+  function renderCharList() {
+    const box = $("charlist"); box.innerHTML = "";
+    for (const c of cstate.list) {
+      const b = document.createElement("button"); b.type = "button"; b.className = "packcard"; b.dataset.id = c.id;
+      b.setAttribute("aria-pressed", !cstate.isNew && c.id === cstate.sel);
+      const name = document.createElement("span"); name.className = "pname"; name.textContent = c.character.name;
+      const tags = document.createElement("span"); tags.className = "ptags";
+      tags.textContent = [c.id === cstate.active ? "In use" : "", c.builtin ? "Built-in" : "Yours", MODEL_NAMES[c.character.tts_model] || ""].filter(Boolean).join(" · ");
+      if (c.id === cstate.active) tags.classList.add("on");
+      b.append(name, tags);
+      b.onclick = () => selectChar(c.id);
+      box.appendChild(b);
+    }
+  }
+  function confirmCharDiscard() { return !cstate.dirty || confirm("Throw away your unsaved changes to this personality?"); }
+  function selectChar(id, force) {
+    if (!force && (id !== cstate.sel || cstate.isNew) && !confirmCharDiscard()) return;
+    const c = charOf(id) || charOf("rocky"); if (!c) return;
+    cstate.sel = c.id; cstate.isNew = false;
+    for (const b of $("charlist").children) b.setAttribute("aria-pressed", b.dataset.id === c.id);
+    $("chartitle").textContent = c.character.name;
+    $("chardesc").textContent = c.builtin ? c.character.description : "";
+    $("charactions").hidden = false;
+    $("charuse").disabled = c.id === cstate.active; $("charuse").textContent = c.id === cstate.active ? "In use" : "Use this personality";
+    for (const b of ["charexport", "chardup", "chardelete"]) $(b).hidden = c.builtin;
+    $("charform").hidden = c.builtin;
+    if (!c.builtin) fillCharForm(c.character);
+    markCharDirty(false);
+  }
+  function blankChar() {
+    return { name: "", description: "", voice_id: "", tts_model: "drama-3", prompt: "", examples: "",
+             lines: { wake: "", sleep: "", track_on: "", track_off: "" }, wake_words: [] };
+  }
+  function newChar() {
+    if (!confirmCharDiscard()) return;
+    cstate.isNew = true; cstate.sel = null;
+    for (const b of $("charlist").children) b.setAttribute("aria-pressed", false);
+    $("chartitle").textContent = "New personality"; $("chardesc").textContent = "Name it, pick a voice, describe it, then press Write it for me.";
+    $("charactions").hidden = true; $("charform").hidden = false;
+    fillCharForm(blankChar()); markCharDirty(false); $("c-name").focus();
+  }
+  function fillCharForm(ch) {
+    cstate.saved = JSON.parse(JSON.stringify(ch));
+    $("c-name").value = ch.name; $("c-voice").value = ch.voice_id; $("c-desc").value = ch.description || "";
+    for (const r of document.getElementsByName("c-model")) r.checked = r.value === (ch.tts_model || "");
+    $("c-prompt").value = ch.prompt; $("c-examples").value = ch.examples || "";
+    for (const k of LINE_KEYS) $("c-l-" + k).value = ch.lines?.[k] || "";
+    $("c-wake").value = (ch.wake_words || []).join("\n");
+    wakeName = ch.name;
+    nameEcho();
+  }
+  function charFromForm() {
+    const model = [...document.getElementsByName("c-model")].find(r => r.checked)?.value ?? "";
+    return { name: $("c-name").value.trim(), description: $("c-desc").value.trim(), voice_id: $("c-voice").value.trim(), tts_model: model,
+             prompt: $("c-prompt").value.trim(), examples: $("c-examples").value.trim(),
+             lines: Object.fromEntries(LINE_KEYS.map(k => [k, $("c-l-" + k).value.trim()])),
+             wake_words: $("c-wake").value.split("\n").map(w => w.trim()).filter(Boolean) };
+  }
+  function nameEcho() {
+    const n = $("c-name").value.trim(), shown = n || "…";
+    $("c-nameecho").textContent = shown; document.querySelectorAll(".c-nameecho2").forEach(e => e.textContent = shown);
+    const letters = n.replace(/[^a-z]/gi, "").length, hint = $("c-namehint");
+    const short = n && letters < 4;
+    hint.classList.toggle("warn", !!short);
+    hint.firstChild.textContent = "Also the wake word: “hey ";
+    hint.lastChild.textContent = short ? "”. Short names wake it by accident: two or three syllables work best." : "”.";
+  }
+  function markCharDirty(on) {
+    cstate.dirty = on;
+    $("c-save").disabled = !on; $("c-saveuse").disabled = !on && !cstate.isNew; $("c-revert").disabled = !on;
+    if (on) $("charsaved").textContent = "";
+  }
+  // Renaming: once the new name is in (the field loses focus), wake words built on the old name ("hey bolt")
+  // follow it ("hey juniper"); mishearings are left for you.
+  let wakeName = "";
+  function renameWakeWords() {
+    const from = wakeName.trim().toLowerCase(), to = $("c-name").value.trim().toLowerCase();
+    if (!to) return;
+    wakeName = $("c-name").value;
+    if (!from || from === to) return;
+    const esc = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    $("c-wake").value = $("c-wake").value.replace(new RegExp(`\\b${esc}\\b`, "g"), to);
+  }
+  $("charform").addEventListener("input", ev => { if (ev.target.id === "c-name") nameEcho(); markCharDirty(true); });
+  $("c-name").addEventListener("change", renameWakeWords);
+  $("charform").addEventListener("submit", ev => ev.preventDefault());
+  $("charnew").onclick = newChar;
+  $("c-revert").onclick = () => { fillCharForm(cstate.saved); markCharDirty(false); };
+
+  async function saveChar() {
+    const j = await post("/launcher/characters/save", { id: cstate.isNew ? null : cstate.sel, character: charFromForm() });
+    cstate.isNew = false; cstate.dirty = false;
+    setRobotName(j.name);
+    await loadChars(j.id);
+    $("charsaved").textContent = j.restarted ? "saved · restarting so the changes apply" : "saved"; $("charsaved").classList.add("ok");
+    return j;
+  }
+  async function useChar(id) {
+    const j = await post("/launcher/characters/use", { id });
+    setRobotName(j.name);
+    if (j.restarted) toast(`${j.name} is waking up…`);
+    else if (j.external) toast(`${j.name} is picked · restart the server where it runs to switch`);
+    else toast(`${j.name} is picked · they'll be there when the server starts`);
+    await loadChars(id);
+  }
+  $("c-save").onclick = () => saveChar().catch(e => toast(e.message, true));
+  $("c-saveuse").onclick = async () => { try { const j = await saveChar(); await useChar(j.id); } catch (e) { toast(e.message, true); } };
+  $("charuse").onclick = () => { if (confirmCharDiscard()) useChar(cstate.sel).catch(e => toast(e.message, true)); };
+  $("chardelete").onclick = async () => {
+    const c = charOf(cstate.sel);
+    if (!c || !confirm(`Delete the personality “${c.character.name}”? This can't be undone.`)) return;
+    try {
+      const j = await post("/launcher/characters/delete", { id: c.id });
+      cstate.dirty = false; cstate.sel = "rocky";
+      setRobotName(j.name);
+      toast(c.id === cstate.active ? "Deleted · back to Rocky" : "Deleted");
+      await loadChars("rocky");
+    } catch (e) { toast(e.message, true); }
+  };
+  $("chardup").onclick = async () => {
+    if (!confirmCharDiscard()) return;
+    const name = prompt("A name for the copy (it's also the wake word):", "");
+    if (!name) return;
+    try { const j = await post("/launcher/characters/save", { character: { ...charOf(cstate.sel).character, name, wake_words: [] } }); cstate.dirty = false; await loadChars(j.id); toast("Copied: edit away"); }
+    catch (e) { toast(e.message, true); }
+  };
+  $("charexport").onclick = () => {
+    const c = charOf(cstate.sel), blob = new Blob([JSON.stringify(c.character, null, 2) + "\n"], { type: "application/json" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = c.id + ".json"; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  $("charimport").onchange = async () => {
+    const f = $("charimport").files[0]; $("charimport").value = "";
+    if (!f || !confirmCharDiscard()) return;
+    try {
+      const j = await post("/launcher/characters/save", { character: JSON.parse(await f.text()) });
+      cstate.dirty = false; cstate.isNew = false; await loadChars(j.id); toast(`Imported ${charOf(j.id)?.character.name || "the personality"}`);
+    } catch (e) { toast(e instanceof SyntaxError ? "That file isn't a personality (bad JSON)" : e.message, true); }
+  };
+
+  $("c-draft").onclick = async () => {
+    const ch = charFromForm(), b = $("c-draft");
+    if ((ch.prompt || ch.examples) && !confirm("Replace what's written on the right with a new draft?")) return;
+    b.disabled = true; b.textContent = "Writing…";
+    try {
+      const j = await post("/launcher/characters/draft", { name: ch.name, description: ch.description, tts_model: ch.tts_model });
+      const d = j.draft;
+      $("c-prompt").value = d.prompt; $("c-examples").value = d.examples;
+      for (const k of LINE_KEYS) $("c-l-" + k).value = d.lines[k] || "";
+      $("c-wake").value = d.wake_words.join("\n");
+      markCharDirty(true); toast("Written · read it over, then Save");
+    } catch (e) { toast(e.message, true); }
+    b.disabled = false; b.textContent = "Write it for me";
+  };
+  let sample = null;
+  $("c-test").onclick = async () => {
+    const ch = charFromForm(), b = $("c-test");
+    const first = ch.examples.split("\n").map(l => l.replace(/^\s*\[\w+\]\s*/, "").trim()).find(Boolean);
+    const text = first || `Hi! I'm ${ch.name || "your new robot"}. This is how I sound.`;
+    b.disabled = true; b.textContent = "Loading…";
+    try {
+      const r = await fetch("/launcher/characters/voice", { method: "POST", headers: { "Content-Type": "application/json", "X-Rocky-Console": "1" },
+                                                           body: JSON.stringify({ voice_id: ch.voice_id, tts_model: ch.tts_model, text }) });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+      if (sample) { sample.pause(); URL.revokeObjectURL(sample.src); }
+      sample = new Audio(URL.createObjectURL(await r.blob()));
+      await sample.play();
+    } catch (e) { toast(e.message, true); }
+    b.disabled = false; b.textContent = "Test voice";
+  };
+  window.addEventListener("beforeunload", ev => { if (cstate.dirty) { ev.preventDefault(); ev.returnValue = ""; } });
+
+  // ── log ────────────────────────────────────────────────────────────────
+  let logSeq = 0, stick = true;
+  const logEl = $("log");
+  logEl.addEventListener("scroll", () => { stick = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 30; });
+  function scrollLog(force) { if (force || stick) logEl.scrollTop = logEl.scrollHeight; }
+  async function pollLog() {
+    if (server.launcher) {
+      try {
+        const j = await (await fetch("/launcher/log?after=" + logSeq)).json();
+        if (j.seq < logSeq) { logEl.textContent = ""; }        // the launcher restarted
+        logSeq = j.seq;
+        const frag = document.createDocumentFragment();
+        for (const line of j.lines) {
+          const span = document.createElement("span");
+          span.className = line.startsWith("──") ? "mark" : line.startsWith("> ") ? "me" : /error|traceback|failed/i.test(line) ? "err" : "";
+          span.textContent = line + "\n"; frag.appendChild(span);
+        }
+        logEl.appendChild(frag);
+        while (logEl.childNodes.length > 3000) logEl.firstChild.remove();
+        if (j.lines.length) scrollLog();
+        $("lognote").textContent = server.running ? "live" : "server stopped · last run";
+      } catch {}
+    } else {
+      $("lognote").textContent = "needs the launcher";
+    }
+    setTimeout(pollLog, document.hidden ? 4000 : 1000);
+  }
+  pollLog();
+  $("cmdform").onsubmit = async ev => {
+    ev.preventDefault();
+    const line = $("cmd").value.trim(); if (!line) return;
+    try { await post("/launcher/console", { line }); $("cmd").value = ""; } catch (e) { toast(e.message, true); }
+  };
+
+  // ── start ──────────────────────────────────────────────────────────────
+  const clock = () => { $("clock").textContent = new Date().toLocaleTimeString([], { hour12: false }); };
+  clock(); setInterval(clock, 1000);
+  const first = $({ "#settings": "t-settings", "#personalities": "t-chars", "#faces": "t-faces", "#log": "t-log" }[location.hash] || store.get("rocky-tab") || "t-live");
+  selectTab(first || tabs[0]);
+})();
+</script>
+</body>
+</html>

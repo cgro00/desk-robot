@@ -1,9 +1,11 @@
-# Pinned to the versions this was built and tested with (2026-09-05).
+# Pinned to the versions this was built and tested with (V2, 2026-10).
 openai==3.8.0            # the chat API OpenRouter / Anthropic / OpenAI all speak
 websockets==17.1
-certifi==2026.7.22          # root certs for the Fish Audio call
+certifi==2026.10.19         # root certs for the Fish Audio call
 faster-whisper==1.2.1   # local speech-to-text
 onnxruntime==1.29.0     # Silero VAD + Smart Turn end-of-turn models (brain/turn.py)
 sounddevice==0.5.6     # Mac microphone (fallback when the robot is offline)
 numpy==2.5.2
-opencv-python-headless==5.0.0.93  # face tracking (YuNet model in models/)
+opencv-contrib-python==5.0.0.93  # face tracking (YuNet model in models/); the edition mediapipe needs, so only one
+                                 # OpenCV gets installed (two editions side by side break each other)
+mediapipe==1.1.0        # what Rocky notices: faces, and hands for a wave (brain/perception.py)

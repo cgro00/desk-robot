@@ -10,9 +10,8 @@ Two voices:
     PowerShell, espeak-ng on Linux.
 
 `stream(text)` yields 16 kHz mono s16le PCM chunks — the exact format the
-robot's speaker expects (docs/protocol.md) — as they're produced.
-`synthesize()` is the same joined into one buffer; `play()` plays a buffer
-on this computer.
+robot's speaker expects (docs/protocol.md) — as they're produced. `play()`
+plays a buffer on this computer.
 """
 
 from __future__ import annotations
@@ -49,6 +48,42 @@ _MARKUP = re.compile(r"[*_`#~<>\[\]{}|\\]")
 _EMOJI = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F]")
 
 
+# Drama 3's acting cues (config.TTS_ACTING): a [direction] before the words it changes, and paired tags around words.
+_PAIRED = ("whisper", "emphasis", "soft", "fast", "slow", "stress", "forceful")
+_CUE = re.compile(r"\[[^\[\]]{1,60}\]|</?(?:" + "|".join(_PAIRED) + r")>", re.IGNORECASE)
+
+
+def without_cues(text: str) -> str:
+    """The words alone, for showing what he said (and for a voice that would read the cues out)."""
+    if not config.TTS_ACTING:
+        return text
+    return re.sub(r"\s+", " ", _CUE.sub(" ", text)).strip()
+
+
+def clean_for_acting(text: str) -> str:
+    """clean_for_tts for a voice that performs cues: keeps the [directions] and paired tags, drops other markup.
+    Each sentence is its own request, so a tag the model opened in one sentence and closed in the next is closed
+    (or reopened) inside each."""
+    keep: list[str] = []
+
+    def stash(m: re.Match) -> str:
+        keep.append(m.group(0).lower() if m.group(0).startswith("<") else m.group(0))
+        return f" \x00{len(keep) - 1}\x00 "
+
+    text = _CUE.sub(stash, text.replace("\x00", ""))   # \x00 marks the kept cues below
+    text = clean_for_tts(text)
+    text = re.sub(r"\x00(\d+)\x00", lambda m: keep[int(m.group(1))], text)
+    for tag in _PAIRED:
+        opens = len(re.findall(f"<{tag}>", text))
+        closes = len(re.findall(f"</{tag}>", text))
+        if closes > opens:
+            text = f"<{tag}>" * (closes - opens) + text
+        elif opens > closes:
+            text = text + f"</{tag}>" * (opens - closes)
+    words = _CUE.sub(" ", text)
+    return text if re.search(r"\w", words) else ""
+
+
 def clean_for_tts(text: str) -> str:
     """What the voice model gets: plain spoken words. Markdown marks, emoji
     and runs of punctuation tend to make generated speech do odd things."""
@@ -74,15 +109,13 @@ def _fish_stream(text: str) -> Iterator[bytes]:
             "top_p": config.TTS_TOP_P,
         }
     ).encode()
-    req = urllib.request.Request(
-        FISH_TTS_URL,
-        data=body,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {os.environ['FISH_AUDIO_API_KEY']}",
-            "Content-Type": "application/json",
-        },
-    )
+    headers = {
+        "Authorization": f"Bearer {os.environ['FISH_AUDIO_API_KEY']}",
+        "Content-Type": "application/json",
+    }
+    if config.TTS_MODEL:
+        headers["model"] = config.TTS_MODEL   # without it Fish uses its default model, quietly
+    req = urllib.request.Request(FISH_TTS_URL, data=body, method="POST", headers=headers)
     # python.org builds of Python on macOS don't see the system root certs;
     # certifi's bundle (already installed with the openai package) does.
     ctx = ssl.create_default_context(cafile=certifi.where())
@@ -115,6 +148,13 @@ class Biquad:
         return cls(np.array([(1 + c) / 2, -(1 + c), (1 + c) / 2]), np.array([1 + al, -2 * c, 1 - al]))
 
     @classmethod
+    def lowpass(cls, fc: float, sr: int = SAMPLE_RATE, q: float = 0.7071) -> "Biquad":
+        w0 = 2 * np.pi * fc / sr
+        al = np.sin(w0) / (2 * q)
+        c = np.cos(w0)
+        return cls(np.array([(1 - c) / 2, 1 - c, (1 - c) / 2]), np.array([1 + al, -2 * c, 1 - al]))
+
+    @classmethod
     def high_shelf(cls, fc: float, gain_db: float, sr: int = SAMPLE_RATE, q: float = 0.7071) -> "Biquad":
         A = 10 ** (gain_db / 40)
         w0 = 2 * np.pi * fc / sr
@@ -124,6 +164,10 @@ class Biquad:
         b = np.array([A * ((A + 1) + (A - 1) * c + s), -2 * A * ((A - 1) + (A + 1) * c), A * ((A + 1) + (A - 1) * c - s)])
         a = np.array([(A + 1) - (A - 1) * c + s, 2 * ((A - 1) - (A + 1) * c), (A + 1) - (A - 1) * c - s])
         return cls(b, a)
+
+    def retune(self, other: "Biquad") -> None:
+        """Take another filter's coefficients and keep this one's state, so a setting can change mid-stream."""
+        self.b, self.a = other.b, other.a
 
     def process(self, x: np.ndarray) -> np.ndarray:
         b0, b1, b2 = self.b
@@ -141,25 +185,73 @@ class Biquad:
 PRESENCE_HZ = 1500.0  # the presence shelf starts here; speech clarity is 1-4 kHz
 
 
+# What the automatic presence lift learned about each voice (voice ID + model): [low-mid energy, clarity energy,
+# lift in dB], kept while the brain runs so a voice's next reply starts where its last one ended.
+_LEARNED_PRESENCE: dict[str, list[float]] = {}
+
+
 class Equalizer:
     """Speaker tuning: a bass cut (the small speaker can't
     reproduce bass, it just rattles the shell) and a presence lift for a
-    voice that comes out muffled. Both off = pass-through."""
+    voice that comes out muffled. Both off = pass-through.
 
-    def __init__(self, highpass_hz: float = 0.0, presence_db: float = 0.0) -> None:
+    With `auto` on, the presence lift also follows the voice: voices differ in how much of their sound is in the
+    low mids (300 Hz-1 kHz, body) against 1-4 kHz (clarity), and on this speaker a voice heavy in the low mids sounds
+    muffled. The two are summed per voice over the last half minute or so of speech (before the lift; loud chunks
+    count most, so a whisper or a laugh doesn't swing it) and the lift steers toward config.TTS_CLARITY_DB, up to
+    config.TTS_AUTO_PRESENCE_MAX more than the fixed presence_db. A voice that is already clear enough gets nothing
+    extra (Rocky's own voice measures about -1.2 dB)."""
+
+    DECAY = 0.995   # per chunk (~130 ms): how long the per-voice sums remember
+    STEP = 0.2      # per chunk: how far the lift moves toward what the sums call for
+
+    def __init__(self, highpass_hz: float = 0.0, presence_db: float = 0.0, auto: bool = False,
+                 voice: str = "") -> None:
         self.stages: list[Biquad] = []
         if highpass_hz > 0:
             # Two stages (4th order, 24 dB/octave): a single one is still
             # letting half the energy through an octave below the cutoff.
             self.stages.append(Biquad.highpass(highpass_hz))
             self.stages.append(Biquad.highpass(highpass_hz))
-        if presence_db != 0:
-            self.stages.append(Biquad.high_shelf(PRESENCE_HZ, presence_db))
+        self.fixed_db = presence_db
+        self.auto = auto
+        self.voice = voice
+        self.memory = _LEARNED_PRESENCE.setdefault(voice, [0.0, 0.0, 0.0]) if auto else [0.0, 0.0, 0.0]
+        self.learned = self.memory[2]
+        self.shelf_db = presence_db + self.learned
+        self.shelf = Biquad.high_shelf(PRESENCE_HZ, self.shelf_db) if self.shelf_db else None
 
     def process(self, x: np.ndarray) -> np.ndarray:
         for stage in self.stages:
             x = stage.process(x)
+        if self.auto:
+            self._learn(x)
+        if self.shelf is not None:
+            x = self.shelf.process(x)
         return x
+
+    def _learn(self, x: np.ndarray) -> None:
+        if len(x) < 512 or float(np.sqrt(np.mean(x * x))) < Leveler.GATE * 2:
+            return   # too short to read, or a gap
+        f = np.fft.rfftfreq(len(x), 1 / SAMPLE_RATE)
+        p = np.abs(np.fft.rfft(x * np.hanning(len(x)))) ** 2
+        body = p[(f >= 300) & (f < 1000)].sum()
+        clear = p[(f >= 1000) & (f < 4000)].sum()
+        m = self.memory
+        m[0] = m[0] * self.DECAY + body
+        m[1] = m[1] * self.DECAY + clear
+        if m[0] <= 0 or m[1] <= 0:
+            return
+        need = float(np.clip(config.TTS_CLARITY_DB - 10 * np.log10(m[1] / m[0]), 0.0, config.TTS_AUTO_PRESENCE_MAX))
+        self.learned += self.STEP * (need - self.learned)
+        m[2] = self.learned
+        want = self.fixed_db + self.learned
+        if abs(want - self.shelf_db) >= 0.25:
+            self.shelf_db = want
+            if self.shelf is None:
+                self.shelf = Biquad.high_shelf(PRESENCE_HZ, want)
+            else:
+                self.shelf.retune(Biquad.high_shelf(PRESENCE_HZ, want))
 
 
 class Leveler:
@@ -181,16 +273,37 @@ class Leveler:
     RELEASE = 0.1       # per chunk: quieter than expected → follow slowly
     SQUEEZE = 0.35      # how far each chunk is pulled toward the running level
                         # (0 = only sentence-scale leveling, 1 = flatten every chunk)
-    CEILING = 0.95      # never let a chunk's peak exceed this: the chunk is turned down, not bent
+    # never let a chunk's peak exceed config.TTS_PEAK: the chunk is turned down, not bent
+
+    # Cone protection (config.TTS_CONE_LIMIT): the speaker's cone moves furthest for the low part of the voice, and
+    # past its limit it distorts (a rattly, clipped sound on loud, deep syllables). The low band (below SPLIT_HZ)
+    # is turned down just enough, the rest of the voice is left alone.
+    SPLIT_HZ = 700.0
+    CONE_HZ = 274.0     # the speaker's resonance: above it, cone travel falls 12 dB per octave
 
     def __init__(self) -> None:
         # Read once per reply, so the console's sliders apply from the next one.
         self.level = config.TTS_LEVEL
-        self.eq = Equalizer(config.TTS_HIGHPASS_HZ, config.TTS_PRESENCE_DB)
+        self.ceiling = config.TTS_PEAK
+        self.eq = Equalizer(config.TTS_HIGHPASS_HZ, config.TTS_PRESENCE_DB, auto=config.TTS_AUTO_PRESENCE,
+                            voice=f"{config.TTS_VOICE_ID}/{config.TTS_MODEL}")
         self.env = 0.0      # loudness estimate; 0 = nothing heard yet
         self.gain = 1.0
+        self.cone_limit = config.TTS_CONE_LIMIT
+        # a Linkwitz-Riley crossover (two Butterworth sections per side): the bands stay in phase and add back up
+        # flat, so turning the low one down really turns the lows down
+        self.split_lo = [Biquad.lowpass(self.SPLIT_HZ), Biquad.lowpass(self.SPLIT_HZ)]
+        self.split_hi = [Biquad.highpass(self.SPLIT_HZ), Biquad.highpass(self.SPLIT_HZ)]
+        self.cone_lo = Biquad.lowpass(self.CONE_HZ)   # how far each band moves the cone
+        self.cone_hi = Biquad.lowpass(self.CONE_HZ)
+        self.low_env = _Lookahead(release_s=0.2)
+        self.peak_env = _Lookahead(release_s=0.05)
+        # the last LOOKAHEAD samples, held back until the samples after them are known: high band, low band, gain,
+        # and how far each band alone would move the cone
+        self.held = [np.zeros(0, np.float32)] * 5
 
     def process(self, pcm: bytes) -> bytes:
+        """The chunk, leveled. Comes out _Lookahead.SAMPLES (3 ms) late; flush() at the end of a line."""
         x = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
         if not len(x):
             return pcm
@@ -211,17 +324,76 @@ class Leveler:
         else:
             target = self.gain  # a gap: hold the gain where it is
         # Peak limiting the way the original build did it (2026-09-06): cap the
-        # chunk's gain so its peak stays under CEILING. The waveform is never
+        # chunk's gain so its peak stays under the ceiling. The waveform is never
         # bent, so loud syllables get quieter rather than harsher.
         peak = float(np.abs(x).max())
         if peak > 0:
-            target = min(target, self.CEILING / peak)
-        y = x * np.linspace(self.gain, target, len(x), dtype=np.float32)
+            target = min(target, self.ceiling / peak)
+        gain = np.linspace(self.gain, target, len(x), dtype=np.float32)
         self.gain = target
-        top = float(np.abs(y).max())
-        if top > self.CEILING:  # the ramp started above the cap: trim the whole chunk
-            y *= self.CEILING / top
-        return (y * 32767).astype(np.int16).tobytes()
+        low, high = x, x
+        for f in self.split_lo:
+            low = f.process(low)
+        for f in self.split_hi:
+            high = f.process(high)
+        new = [high, low, gain, np.abs(self.cone_lo.process(low)), np.abs(self.cone_hi.process(high))]
+        self.held = [np.concatenate([h, n.astype(np.float32)]) for h, n in zip(self.held, new)]
+        return self._release(len(self.held[0]) - _Lookahead.SAMPLES)
+
+    def flush(self) -> bytes:
+        """The held-back end of the line."""
+        return self._release(len(self.held[0]), final=True)
+
+    def _release(self, n: int, final: bool = False) -> bytes:
+        """Send out the first n held samples. Each gain below can see LOOKAHEAD samples ahead, so it is already down
+        when a loud moment arrives instead of jumping at it: the ramp in a chunk's gain from the last chunk's could
+        start a loud syllable above the ceiling, and the whole-chunk trim that caught it used to step the level at
+        the chunk's edge (a click)."""
+        if n <= 0:
+            return b""
+        high, low, gain, cone_lo, cone_hi = self.held
+        if self.cone_limit > 0:
+            # the high band's share of the travel stays; the low band gets what's left of the limit
+            room = np.maximum(self.cone_limit - cone_hi * gain, 0.0)
+            need = np.minimum(1.0, room / np.maximum(cone_lo * gain, 1e-9))
+            g = self.low_env.gains(need, n, final)
+            # the samples still held get a provisional gain: enough for the peak limiter to see ahead
+            low = low * np.concatenate([g, np.minimum(g[-1], need[n:])])
+        y0 = (high + low) * gain
+        y = y0[:n] * self.peak_env.gains(np.minimum(1.0, self.ceiling / np.maximum(np.abs(y0), 1e-9)), n, final)
+        self.held = [a[n:] for a in self.held]
+        return (np.clip(y, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+
+
+class _Lookahead:
+    """A gain that never lets a sample through above what it may have, without ever jumping: it starts down
+    SAMPLES before the sample that needs it (in a straight line), and comes back up over `release_s`."""
+
+    SAMPLES = 48    # 3 ms
+
+    def __init__(self, release_s: float) -> None:
+        self.step = 1.0 / (release_s * SAMPLE_RATE)
+        self.mins = np.ones(self.SAMPLES - 1, np.float32)   # the last few window minimums: the next ramp starts from them
+        self.last = 1.0
+
+    def gains(self, allowed: np.ndarray, n: int, final: bool) -> np.ndarray:
+        """Gains for the first n samples of `allowed` (the most each sample may have; it runs SAMPLES past n unless
+        `final`). The minimum over the next SAMPLES samples, averaged over the last SAMPLES of those minimums, is a
+        ramp that reaches each limit by the time its sample comes; then a slow way back up."""
+        k = self.SAMPLES
+        a = np.concatenate([allowed.astype(np.float32), np.full(k - 1, allowed[-1] if final else 1.0, np.float32)])
+        mins = np.lib.stride_tricks.sliding_window_view(a, k).min(axis=1)[:n]
+        ext = np.concatenate([self.mins, mins])
+        c = np.concatenate([[0.0], np.cumsum(ext, dtype=np.float64)])
+        ramp = ((c[k:k + n] - c[:n]) / k).astype(np.float32)
+        out = np.empty(n, np.float32)
+        last, step = self.last, self.step
+        for i, r in enumerate(ramp.tolist()):
+            last = r if r < last + step else last + step
+            out[i] = last
+        self.last = last
+        self.mins = ext[-(k - 1):]
+        return out
 
 
 def _wav_to_pcm16k(wav_bytes: bytes) -> bytes:
@@ -291,7 +463,9 @@ def stream(text: str, leveler: Leveler | None = None) -> Iterator[bytes]:
     Fish Audio when it's set up and reachable, else the computer's own voice
     (all at once). Loudness is steadied by `leveler` (a fresh one if none is
     given). A saved copy goes to debug/tts/ when DEBUG_SAVE_TTS is on."""
-    text = clean_for_tts(text)
+    acting = config.TTS_ACTING
+    plain = clean_for_tts(without_cues(text))   # the built-in voice would read cues out
+    text = clean_for_acting(text) if acting else plain
     if not text:
         return
     leveler = leveler or Leveler()
@@ -309,7 +483,7 @@ def stream(text: str, leveler: Leveler | None = None) -> Iterator[bytes]:
                 chunks = None
         if chunks is None:
             try:
-                first = _synthesize_builtin(text)
+                first = _synthesize_builtin(plain)
             except NoBuiltinVoice as e:
                 print(f"(cannot speak: {e})")
                 return
@@ -325,15 +499,14 @@ def stream(text: str, leveler: Leveler | None = None) -> Iterator[bytes]:
                     yield chunk
             except Exception as e:  # dropped mid-stream: say what we have
                 print(f"(fish audio stream cut short: {e})")
+        tail = leveler.flush()
+        if tail:
+            parts.append(tail)
+            yield tail
         complete = True
     finally:
         if complete and parts and config.DEBUG_SAVE_TTS:
             _save_clip(b"".join(parts), text)
-
-
-def synthesize(text: str) -> bytes:
-    """Rocky's reply as one 16 kHz mono signed 16-bit little-endian PCM buffer."""
-    return b"".join(stream(text))
 
 
 def _save_clip(pcm: bytes, text: str) -> None:
@@ -355,16 +528,6 @@ def _save_clip(pcm: bytes, text: str) -> None:
                 except OSError: pass
     except OSError:
         pass
-
-
-def normalize(pcm: bytes, peak: float = 0.95) -> bytes:
-    """Scale so the loudest sample hits `peak` of full scale. Used for the
-    built-in fallback voice, which arrives all at once."""
-    samples = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
-    top = float(np.abs(samples).max()) if len(samples) else 0.0
-    if top < 1:
-        return pcm
-    return np.clip(samples * (peak * 32767 / top), -32768, 32767).astype(np.int16).tobytes()
 
 
 def play(pcm: bytes) -> None:
@@ -391,10 +554,3 @@ def play(pcm: bytes) -> None:
         subprocess.run(["afplay", path], check=False, timeout=60)
     finally:
         os.unlink(path)
-
-
-def speak(text: str) -> bytes:
-    """Synthesize and play on this computer; returns the PCM for the robot too."""
-    pcm = synthesize(text)
-    play(pcm)
-    return pcm

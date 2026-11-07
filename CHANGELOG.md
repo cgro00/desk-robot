@@ -3,7 +3,7 @@
 Each version of the robot is a git tag and a GitHub Release. `main` is the
 latest work. A video matches the tagged version it was made with.
 
-## Unreleased (V2, in progress)
+## v2.1 - 2026-11-06
 
 - New 3D-printed pan/tilt neck: geared 360° pan, unrestricted tilt, flat
   head plate. Replaces the off-the-shelf SG90-style bracket.

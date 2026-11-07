@@ -14,6 +14,19 @@ firmware/include/secrets.h
 .env.*
 !.env.example
 
+# Dashboard settings: personal (your location, your name)
+server/settings.json
+# Perception models: downloaded on first run (brain/perception.py), pinned and checksummed
+server/models/*.task
+server/models/rfdetr_*.onnx
+server/models/siglip_*
+
+# Face packs made in the dashboard (export one to share it)
+server/faces/custom/
+
+# Personalities made in the dashboard (export one to share it)
+server/characters/
+
 # macOS and editors
 .DS_Store
 .vscode/
@@ -34,3 +47,6 @@ docs/cad/
 
 # Codex CLI project config (written by the Fusion MCP add-in)
 .codex/
+
+# Custom PCBs (KiCad, Gerbers): sold with the print files, not in the repo
+pcb/

@@ -8,7 +8,15 @@ static const int SAMPLE_RATE = 16000;
 
 void Mic::begin(uint8_t clkPin, uint8_t dataPin, float gain) {
   gain_ = gain;
-  queue_ = xQueueCreate(16, FRAME_BYTES);  // ~0.5 s of frames
+  // ~2 s of frames, in PSRAM: loop() sometimes waits half a second on WiFi (a camera picture going out), and a
+  // 0.5 s queue then dropped the start of what was said. Tasks only touch the queue (no ISR), so PSRAM is fine.
+  static const UBaseType_t FRAMES = 64;
+  static StaticQueue_t queueState;
+  if (uint8_t* storage = static_cast<uint8_t*>(ps_malloc(FRAMES * FRAME_BYTES))) {
+    queue_ = xQueueCreateStatic(FRAMES, FRAME_BYTES, storage, &queueState);
+  } else {
+    queue_ = xQueueCreate(16, FRAME_BYTES);   // no PSRAM: ~0.5 s in internal RAM
+  }
 
   i2s_config_t cfg = {};
   cfg.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_PDM);

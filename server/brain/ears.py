@@ -16,6 +16,7 @@ you sound mid-thought he keeps listening.
 
 from __future__ import annotations
 
+import contextlib
 import queue
 import re
 import threading
@@ -95,6 +96,10 @@ class Segmenter:
         self._next_check = 0
         self.speech_prob = 0.0   # VAD output for the latest chunk (for `mic`)
         self.last_decision = ""  # why the last turn ended (for logs)
+        # The last ~2 s, chunk by chunk: (time, level, VAD score, counted as voice), for the dashboard's strip, which
+        # shows one bar per look (5 a second): the latest 32 ms chunk alone was often a gap between syllables.
+        self._recent: deque[tuple[float, float, float, bool]] = deque(maxlen=64)
+        self._recent_lock = threading.Lock()
 
     def apply_config(self) -> None:
         """Re-read the timing knobs from config (they can change at runtime)."""
@@ -107,6 +112,16 @@ class Segmenter:
     def talking(self) -> bool:
         """Someone has been speaking for at least CANCEL_MIN_SPEECH."""
         return self.speaking and self.announced
+
+    def recent(self, seconds: float) -> tuple[float, float, bool]:
+        """Over the last `seconds`: the loudest level, the highest speech score, and whether any of it counted as
+        voice (with the softer cutoff that holds once someone has started talking, as the turn itself uses)."""
+        since = time.time() - seconds
+        with self._recent_lock:
+            got = [r for r in self._recent if r[0] >= since]
+        if not got:
+            return 0.0, 0.0, False
+        return max(r[1] for r in got), max(r[2] for r in got), any(r[3] for r in got)
 
     def push(self, block: np.ndarray) -> np.ndarray | None:
         now = time.time()
@@ -136,6 +151,8 @@ class Segmenter:
         if self.speaking:
             threshold = max(0.01, threshold - 0.15)
         loud = prob > threshold
+        with self._recent_lock:
+            self._recent.append((time.time(), float(np.sqrt(np.mean(chunk * chunk))), prob, loud))
         if not self.speaking:
             self.pre_roll.append(chunk)
             if loud:
@@ -269,12 +286,16 @@ class Ears:
         self,
         on_utterance: Callable[[str, float, float], None],
         on_speech_start: Callable[[], None] | None = None,
-        device: int | str | None = config.MIC_DEVICE,
+        device: int | str | None = None,
+        on_turn_end: Callable[[], None] | None = None,
     ) -> None:
         self.on_utterance = on_utterance
+        self.on_turn_end = on_turn_end      # the moment a turn ends, before it's transcribed
+        self.transcribing = False           # a turn is being turned into text right now
         self.device = device
         self.device_name = "?"
         self.mac_error: str | None = None  # why the Mac mic could not be opened, if it couldn't
+        self.device_missing: str | None = None  # the input asked for, when it isn't there (the default is open instead)
         self.muted = threading.Event()  # set while Rocky is talking (no echo cancel)
         self.source = "mac"             # "mac" or "robot": whose audio is live
         self.level = 0.0                # RMS of the latest live block (for `mic`)
@@ -302,6 +323,10 @@ class Ears:
         """Speech is going on right now (a turn is open)."""
         return self._segmenter.speaking
 
+    def recent(self, seconds: float = 0.25) -> tuple[float, float, bool]:
+        """(loudest level, highest speech score, any of it voice) over the last `seconds` (the dashboard's strip)."""
+        return self._segmenter.recent(seconds)
+
     @property
     def talking(self) -> bool:
         """Speech has been going on for at least CANCEL_MIN_SPEECH."""
@@ -320,41 +345,75 @@ class Ears:
         """Start the worker and try to open the Mac mic. A missing Mac mic
         (interface unplugged, wrong MIC_DEVICE) must not stop the robot's own
         mic from working: it only means there is no Mac fallback, so the
-        failure is recorded in mac_error and start() still succeeds."""
+        failure is recorded in mac_error and start() still succeeds. If the
+        input asked for isn't there, the system default opens instead and
+        device_missing says which one was wanted."""
         self._worker = threading.Thread(target=self._run, daemon=True)
         self._worker.start()
+        self._open_wanted()
+        return self.device_name
+
+    def set_device(self, device: str | None) -> str:
+        """Switch to another input on this computer (None = the system default), live."""
+        self.device = device
+        self._close()
+        try:
+            import sounddevice as sd
+            sd._terminate()   # PortAudio lists the devices once, when it starts: look again, for one plugged in since
+            sd._initialize()
+        except Exception:
+            pass
+        self._open_wanted()
+        return self.device_name
+
+    def _open_wanted(self) -> None:
+        self.device_missing = None
+        if not self._open(self.device) and self.device is not None:
+            self.device_missing = str(self.device)
+            self._open(None)
+
+    def _open(self, device) -> bool:
+        stream = None
         try:
             import sounddevice as sd
 
             # Open every input the device has (a USB interface often has two) and mix them,
             # so it doesn't matter which jack the mic is plugged into.
-            channels = max(1, int(sd.query_devices(self.device, "input")["max_input_channels"]))
-            self._stream = sd.InputStream(
+            channels = max(1, int(sd.query_devices(device, "input")["max_input_channels"]))
+            stream = sd.InputStream(
                 samplerate=SAMPLE_RATE,
                 channels=channels,
                 dtype="float32",
                 blocksize=BLOCK_SAMPLES,
-                device=self.device,
+                device=device,
                 callback=self._on_audio,
             )
-            self._stream.start()
-            self.device_name = sd.query_devices(self._stream.device)["name"]
-            self.mac_error = None
+            stream.start()
+            name = sd.query_devices(stream.device)["name"]
         except Exception as e:
-            self._stream = None
-            self.device_name = "no Mac mic"
+            if stream is not None:
+                with contextlib.suppress(Exception):
+                    stream.close()
+            if self._stream is None:
+                self.device_name = "no Mac mic"
             self.mac_error = str(e)
-        return self.device_name
+            return False
+        self._stream, self.device_name, self.mac_error = stream, name, None   # together: the status never sees half
+        return True
+
+    def _close(self) -> None:
+        if self._stream is not None:
+            with contextlib.suppress(Exception):
+                self._stream.stop()
+                self._stream.close()
+            self._stream = None
 
     @property
     def has_mac_mic(self) -> bool:
         return self._stream is not None
 
     def stop(self) -> None:
-        if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
+        self._close()
         self._blocks.put(None)
 
     def _on_audio(self, indata, frames, time_info, status) -> None:
@@ -372,6 +431,8 @@ class Ears:
             utterance = segmenter.push(block)
             if utterance is None:
                 continue
+            if self.on_turn_end is not None:
+                self.on_turn_end()
             # Bring quiet speech up to a healthy level for the model.
             peak = float(np.abs(utterance).max())
             if peak > 0.001:
@@ -379,7 +440,11 @@ class Ears:
             if config.DEBUG_SAVE_UTTERANCE:
                 _save_wav(utterance, config.DEBUG_SAVE_UTTERANCE)
             t0 = time.time()
-            text = self.transcriber.transcribe(utterance)
+            self.transcribing = True
+            try:
+                text = self.transcriber.transcribe(utterance)
+            finally:
+                self.transcribing = False
             print(f"  (turn: {segmenter.last_decision}; transcribed in {time.time() - t0:.2f}s)")
             if text:
                 self.on_utterance(text, segmenter.started_at, segmenter.ended_at)

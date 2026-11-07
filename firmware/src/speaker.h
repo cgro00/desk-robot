@@ -35,6 +35,8 @@ class Speaker {
   uint32_t lastUnderruns() const { return underruns_; }
   size_t lastPrebuffered() const { return prebuffered_; }
   uint32_t lastPrebufferMs() const { return prebufferMs_; }
+  // How much the next line buffers before it plays, in ms (adapts: see Speaker::task).
+  uint32_t headStartMs() const { return prebufferBytes_ / 32; }
 
  private:
   static void taskEntry(void* self);
@@ -49,7 +51,8 @@ class Speaker {
   volatile bool speaking_ = false;
   volatile bool ended_ = false;
   size_t expectedBytes_ = 0;
-  volatile uint32_t underruns_ = 0;
+  volatile uint32_t underruns_ = 0;   // 5 ms polls that found the buffer dry mid-line
+  size_t prebufferBytes_ = 12800;     // START_PREBUFFER
   volatile size_t prebuffered_ = 0;
   volatile uint32_t prebufferMs_ = 0;
   uint32_t speechStartMs_ = 0;

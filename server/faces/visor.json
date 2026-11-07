@@ -1,0 +1,140 @@
+{
+  "name": "Visor",
+  "author": "desk-robot",
+  "description": "One wide glowing bar across the screen.",
+  "gap": 0,
+  "y": -2,
+  "cyclops": true,
+  "outline": false,
+  "glint": false,
+  "mouth": "talk",
+  "asleep": {
+    "w": 80,
+    "h": 3,
+    "rt": 1,
+    "rb": 1
+  },
+  "emotions": {
+    "neutral": {
+      "w": 84,
+      "h": 18,
+      "rt": 9,
+      "rb": 9
+    },
+    "happy": {
+      "w": 84,
+      "h": 22,
+      "rt": 11,
+      "rb": 11,
+      "cheek": 12
+    },
+    "sad": {
+      "w": 76,
+      "h": 16,
+      "rt": 8,
+      "rb": 8,
+      "st": -6,
+      "fx": [
+        "tear"
+      ]
+    },
+    "angry": {
+      "w": 84,
+      "h": 14,
+      "rt": 6,
+      "rb": 7,
+      "st": 8,
+      "fx": [
+        "steam",
+        "shake"
+      ]
+    },
+    "surprised": {
+      "w": 88,
+      "h": 28,
+      "rt": 14,
+      "rb": 14,
+      "fx": [
+        "pop"
+      ],
+      "pop": 0.3
+    },
+    "sleepy": {
+      "w": 84,
+      "h": 18,
+      "rt": 9,
+      "rb": 9,
+      "lid": 9
+    },
+    "thinking": {
+      "w": 70,
+      "h": 14,
+      "rt": 7,
+      "rb": 7,
+      "fx": [
+        "dots"
+      ],
+      "gaze": [
+        10,
+        -4
+      ]
+    },
+    "curious": {
+      "w": 74,
+      "h": 22,
+      "rt": 11,
+      "rb": 11,
+      "st": -3,
+      "gaze": [
+        -8,
+        -3
+      ]
+    },
+    "skeptical": {
+      "w": 84,
+      "h": 18,
+      "rt": 9,
+      "rb": 9,
+      "st": 6,
+      "lid": 4,
+      "gaze": [
+        6,
+        0
+      ]
+    },
+    "excited": {
+      "w": 90,
+      "h": 24,
+      "rt": 12,
+      "rb": 12,
+      "cheek": 8,
+      "fx": [
+        "sparkle",
+        "bounce"
+      ],
+      "pop": 0.25
+    },
+    "love": {
+      "w": 80,
+      "h": 22,
+      "rt": 11,
+      "rb": 11,
+      "cheek": 10,
+      "fx": [
+        "hearts"
+      ],
+      "pop": 0.2
+    },
+    "confused": {
+      "w": 80,
+      "h": 18,
+      "rt": 9,
+      "rb": 9,
+      "st": -5,
+      "fx": [
+        "question",
+        "wobble"
+      ]
+    }
+  }
+}

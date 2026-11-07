@@ -6,7 +6,9 @@
 static const i2s_port_t I2S_PORT = I2S_NUM_1;
 static const int SAMPLE_RATE = 16000;
 static const size_t RING_BYTES = 1024 * 1024;  // 32 s of audio, in PSRAM
-static const size_t MIN_PREBUFFER = 6400;      // 200 ms, if the size is unknown
+static const size_t MIN_PREBUFFER = 6400;      // 200 ms, if the size is unknown...
+static const size_t START_PREBUFFER = 12800;   // ...but 400 ms at power-on, while the WiFi link settles...
+static const size_t GAPPY_PREBUFFER = 19200;   // ...and up to 600 ms while lines keep running dry
 static const size_t MAX_PREBUFFER = 32000;     // 1 s: never wait longer than this
 static const size_t CHUNK_SAMPLES = 256;
 
@@ -117,7 +119,7 @@ void Speaker::task() {
       // Buffer the whole line if it's short, else up to 1 s, before playing.
       // The brain sends the entire reply at once, so this costs little
       // latency and rides out WiFi hiccups.
-      size_t want = expectedBytes_ ? min(expectedBytes_, MAX_PREBUFFER) : MIN_PREBUFFER;
+      size_t want = expectedBytes_ ? min(expectedBytes_, MAX_PREBUFFER) : prebufferBytes_;
       if (avail < want && !ended_) {
         vTaskDelay(pdMS_TO_TICKS(5));
         continue;
@@ -132,6 +134,13 @@ void Speaker::task() {
         vTaskDelay(pdMS_TO_TICKS(80));
         i2s_zero_dma_buffer(I2S_PORT);
         i2s_stop(I2S_PORT);
+        // The next line's head start: longer after a line that ran dry (100 ms more), back toward 200 ms after
+        // clean ones (50 ms a line). Gaps cost more than the wait does.
+        if (underruns_ > 0) {
+          prebufferBytes_ = min(prebufferBytes_ + 3200, GAPPY_PREBUFFER);
+        } else if (prebufferBytes_ > MIN_PREBUFFER) {
+          prebufferBytes_ = max(prebufferBytes_ - 1600, MIN_PREBUFFER);
+        }
         speaking_ = false;
         level_ = 0;
         if (onDone_) onDone_();

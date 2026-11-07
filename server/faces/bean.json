@@ -1,0 +1,173 @@
+{
+  "name": "Bean",
+  "author": "desk-robot",
+  "description": "Small round eyes set wide, with a little mouth that smiles and frowns.",
+  "gap": 36,
+  "y": -4,
+  "cyclops": false,
+  "outline": false,
+  "glint": true,
+  "mouth": "always",
+  "asleep": {
+    "w": 18,
+    "h": 3,
+    "rt": 1,
+    "rb": 1
+  },
+  "emotions": {
+    "neutral": {
+      "w": 18,
+      "h": 22,
+      "rt": 9,
+      "rb": 9,
+      "smile": 2
+    },
+    "happy": {
+      "w": 20,
+      "h": 20,
+      "rt": 10,
+      "rb": 10,
+      "cheek": 10,
+      "fx": [
+        "blush"
+      ],
+      "smile": 4
+    },
+    "sad": {
+      "w": 18,
+      "h": 18,
+      "rt": 9,
+      "rb": 9,
+      "st": -5,
+      "fx": [
+        "tear"
+      ],
+      "smile": -3
+    },
+    "angry": {
+      "w": 18,
+      "h": 16,
+      "rt": 6,
+      "rb": 8,
+      "st": 7,
+      "fx": [
+        "steam"
+      ],
+      "smile": -2
+    },
+    "surprised": {
+      "w": 22,
+      "h": 26,
+      "rt": 11,
+      "rb": 11,
+      "fx": [
+        "pop"
+      ],
+      "pop": 0.35
+    },
+    "sleepy": {
+      "w": 18,
+      "h": 22,
+      "rt": 9,
+      "rb": 9,
+      "lid": 12,
+      "smile": 1
+    },
+    "thinking": {
+      "w": 16,
+      "h": 20,
+      "rt": 8,
+      "rb": 8,
+      "lid": 4,
+      "fx": [
+        "dots"
+      ],
+      "gaze": [
+        6,
+        -4
+      ]
+    },
+    "curious": {
+      "w": 16,
+      "h": 20,
+      "rt": 8,
+      "rb": 8,
+      "right": {
+        "w": 22,
+        "h": 26,
+        "rt": 11,
+        "rb": 11,
+        "dy": -2
+      },
+      "gaze": [
+        -5,
+        -3
+      ],
+      "smile": 1
+    },
+    "skeptical": {
+      "w": 18,
+      "h": 24,
+      "rt": 9,
+      "rb": 9,
+      "st": -3,
+      "right": {
+        "w": 18,
+        "h": 22,
+        "rt": 9,
+        "rb": 9,
+        "lid": 11
+      },
+      "gaze": [
+        4,
+        0
+      ],
+      "smile": -1
+    },
+    "excited": {
+      "w": 22,
+      "h": 24,
+      "rt": 11,
+      "rb": 11,
+      "cheek": 8,
+      "fx": [
+        "sparkle",
+        "bounce"
+      ],
+      "smile": 5,
+      "pop": 0.25
+    },
+    "love": {
+      "w": 20,
+      "h": 20,
+      "rt": 10,
+      "rb": 10,
+      "cheek": 9,
+      "fx": [
+        "hearts",
+        "blush"
+      ],
+      "smile": 4,
+      "pop": 0.2
+    },
+    "confused": {
+      "w": 18,
+      "h": 24,
+      "rt": 9,
+      "rb": 9,
+      "st": -4,
+      "right": {
+        "w": 16,
+        "h": 16,
+        "rt": 8,
+        "rb": 8,
+        "dy": 4
+      },
+      "fx": [
+        "question",
+        "wobble"
+      ],
+      "smile": -2
+    }
+  }
+}

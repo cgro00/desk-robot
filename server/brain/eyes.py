@@ -3,9 +3,11 @@
 The robot sends one JPEG per binary frame (type byte 0x02). We keep only the
 newest. A tiny HTTP server (standard library, its own thread) serves:
 
-  /          the console page (brain/liveview.html): what Rocky sees and
-             hears, plus controls for his head, face, voice, sleep and
-             listening tuning
+  /          the dashboard page (brain/dashboard.html): what Rocky sees and
+             hears, plus controls for his head, face, voice and sleep. The
+             launcher (server/launcher.py, port 8766) serves the same page with
+             settings and a Start button, and passes the live parts through
+             to this server
   /stream    multipart MJPEG — the newest frame, pushed as it changes
   /frame     the newest frame as a plain JPEG
   /status    JSON: fps, frame age, chip temperature, last transcript, and
@@ -18,6 +20,7 @@ newest. A tiny HTTP server (standard library, its own thread) serves:
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import threading
 import time
@@ -26,6 +29,28 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import config
+
+_ROTATE_CODES = {90: "ROTATE_90_CLOCKWISE", 180: "ROTATE_180", 270: "ROTATE_90_COUNTERCLOCKWISE"}
+
+
+def rotate_jpeg(jpeg: bytes, deg: int, mirror: bool = False) -> bytes:
+    """Turn a JPEG `deg` degrees clockwise (0 / 90 / 180 / 270), then mirror it left-right if asked. The camera sits
+    on its side in the V2 head and the sensor can only flip, not turn, so frames are turned here. Returns the input
+    unchanged for 0 without mirror, or on any error."""
+    code = _ROTATE_CODES.get(int(deg) % 360)
+    if (code is None and not mirror) or not jpeg:
+        return jpeg
+    import cv2           # only needed when rotating (the tracker imports it anyway)
+    import numpy as np
+    img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        return jpeg
+    if code is not None:
+        img = cv2.rotate(img, getattr(cv2, code))
+    if mirror:
+        img = cv2.flip(img, 1)
+    ok, out = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    return out.tobytes() if ok else jpeg
 
 
 class Eyes:
@@ -49,6 +74,7 @@ class Eyes:
 
     # ── robot → server ──────────────────────────────────────────────────────
     def push_frame(self, jpeg: bytes) -> None:
+        jpeg = rotate_jpeg(jpeg, config.CAMERA_ROTATE, config.CAMERA_MIRROR)
         now = time.time()
         with self._cond:
             self.jpeg = jpeg
@@ -93,7 +119,7 @@ class Eyes:
     # ── browser ─────────────────────────────────────────────────────────────
     def serve(self, port: int, bind: str = "127.0.0.1") -> None:
         eyes = self
-        page = (Path(__file__).with_name("liveview.html").read_text(encoding="utf-8")
+        page = (Path(__file__).with_name("dashboard.html").read_text(encoding="utf-8")
                 .replace("{name}", config.ROBOT_NAME).encode())
         local_hosts = ("localhost", "127.0.0.1", "::1", bind.lower())
 
@@ -108,14 +134,32 @@ class Eyes:
                 # A malicious web page can point its own domain at 127.0.0.1
                 # (DNS rebinding) and read a localhost server. Only answer
                 # requests addressed to us by a local name.
-                host = (self.headers.get("Host") or "").split(":")[0].strip("[]").lower()
+                host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()   # "[::1]:8767" too
                 if host not in local_hosts:
+                    self._reply(403, "text/plain", b"forbidden")
+                    return False
+                # Another site's page making the browser fetch us (an <img>, a script) is refused; following a
+                # link to the page is fine.
+                if (self.headers.get("Sec-Fetch-Site") == "cross-site"
+                        and self.headers.get("Sec-Fetch-Dest", "document") != "document"):
                     self._reply(403, "text/plain", b"forbidden")
                     return False
                 return True
 
+            def _from_this_computer(self) -> bool:
+                # The controls answer this computer only, even if LIVE_VIEW_BIND opens the page to the LAN:
+                # the header and Origin checks stop browsers, not a script on another machine.
+                try:
+                    ip = ipaddress.ip_address(self.client_address[0].split("%")[0])
+                except ValueError:
+                    return False
+                return ip.is_loopback or bool(getattr(ip, "ipv4_mapped", None) and ip.ipv4_mapped.is_loopback)
+
             def do_POST(self) -> None:
                 if not self._local():
+                    return
+                if not self._from_this_computer():
+                    self._reply(403, "application/json", b'{"error": "controls answer this computer only"}')
                     return
                 # Controls: a page on another site could still POST here
                 # (browsers allow simple cross-site POSTs), so demand a custom
@@ -136,7 +180,7 @@ class Eyes:
                     payload = json.loads(self.rfile.read(length) or b"{}")
                     if not isinstance(payload, dict):
                         raise ValueError("body must be a JSON object")
-                except (ValueError, json.JSONDecodeError) as e:
+                except (ValueError, json.JSONDecodeError, RecursionError) as e:
                     self._reply(400, "application/json", json.dumps({"error": f"bad request: {e}"}).encode())
                     return
                 action = self.path[len("/api/"):]
@@ -187,6 +231,8 @@ class Eyes:
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Content-Type-Options", "nosniff")  # robot-supplied bytes stay images
+                self.send_header("X-Frame-Options", "DENY")                  # no framing (clickjacking)
+                self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
                 self.end_headers()
                 self.wfile.write(body)
 

@@ -1,0 +1,161 @@
+{
+  "name": "Blocky",
+  "author": "desk-robot",
+  "description": "Big square eyes, close together, in the style of classic toy robots.",
+  "gap": 12,
+  "y": -2,
+  "cyclops": false,
+  "outline": false,
+  "glint": false,
+  "mouth": "talk",
+  "asleep": {
+    "w": 40,
+    "h": 4,
+    "rt": 2,
+    "rb": 2
+  },
+  "emotions": {
+    "neutral": {
+      "w": 40,
+      "h": 40,
+      "rt": 8,
+      "rb": 8
+    },
+    "happy": {
+      "w": 42,
+      "h": 40,
+      "rt": 10,
+      "rb": 10,
+      "cheek": 22
+    },
+    "sad": {
+      "w": 38,
+      "h": 30,
+      "rt": 8,
+      "rb": 8,
+      "st": -10,
+      "lid": 2,
+      "fx": [
+        "tear"
+      ]
+    },
+    "angry": {
+      "w": 40,
+      "h": 28,
+      "rt": 5,
+      "rb": 8,
+      "st": 14,
+      "fx": [
+        "shake"
+      ]
+    },
+    "surprised": {
+      "w": 44,
+      "h": 48,
+      "rt": 12,
+      "rb": 12,
+      "fx": [
+        "pop"
+      ],
+      "pop": 0.3
+    },
+    "sleepy": {
+      "w": 40,
+      "h": 34,
+      "rt": 8,
+      "rb": 8,
+      "lid": 20
+    },
+    "thinking": {
+      "w": 36,
+      "h": 36,
+      "rt": 8,
+      "rb": 8,
+      "lid": 8,
+      "fx": [
+        "dots"
+      ],
+      "gaze": [
+        8,
+        -5
+      ]
+    },
+    "curious": {
+      "w": 36,
+      "h": 36,
+      "rt": 8,
+      "rb": 8,
+      "right": {
+        "w": 44,
+        "h": 44,
+        "rt": 10,
+        "rb": 10,
+        "dy": -3
+      },
+      "gaze": [
+        -6,
+        -3
+      ]
+    },
+    "skeptical": {
+      "w": 40,
+      "h": 42,
+      "rt": 8,
+      "rb": 8,
+      "st": -4,
+      "right": {
+        "w": 40,
+        "h": 40,
+        "rt": 8,
+        "rb": 8,
+        "lid": 20
+      },
+      "gaze": [
+        5,
+        0
+      ]
+    },
+    "excited": {
+      "w": 44,
+      "h": 44,
+      "rt": 12,
+      "rb": 12,
+      "cheek": 12,
+      "fx": [
+        "sparkle",
+        "bounce"
+      ],
+      "pop": 0.25
+    },
+    "love": {
+      "w": 42,
+      "h": 38,
+      "rt": 12,
+      "rb": 12,
+      "cheek": 14,
+      "fx": [
+        "hearts"
+      ],
+      "pop": 0.2
+    },
+    "confused": {
+      "w": 38,
+      "h": 42,
+      "rt": 8,
+      "rb": 8,
+      "st": -6,
+      "right": {
+        "w": 34,
+        "h": 28,
+        "rt": 8,
+        "rb": 8,
+        "st": 5,
+        "dy": 5
+      },
+      "fx": [
+        "question",
+        "wobble"
+      ]
+    }
+  }
+}
