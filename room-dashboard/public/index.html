@@ -27,7 +27,21 @@
 
   <section class="top-grid">
     <article class="card scene">
-      <div class="tag"><span>JUST NU</span><span id="source">–</span></div>
+      <div class="tag">
+        <span>JUST NU</span>
+        <span class="view-switch" role="group" aria-label="Visa">
+          <button id="show-room" aria-pressed="true">Rummet</button>
+          <button id="show-camera" aria-pressed="false">Kamera</button>
+          <select id="camera-device" aria-label="Välj kamera" hidden></select>
+        </span>
+        <span id="source">–</span>
+      </div>
+      <div id="camera-view" class="camera-view" hidden>
+        <video id="camera" autoplay muted playsinline></video>
+        <div id="camera-chip" class="camera-chip"></div>
+        <div id="camera-msg" class="camera-msg" hidden></div>
+        <div class="camera-note">LIVE · bara på den här datorn, ingenting spelas in</div>
+      </div>
       <svg id="room" viewBox="0 0 640 360" preserveAspectRatio="xMidYMax slice" role="img" aria-labelledby="room-title">
         <title id="room-title">Illustrerat rum med fönster, skrivbord, lampa och växt</title>
         <defs>

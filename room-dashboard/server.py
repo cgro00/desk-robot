@@ -112,6 +112,7 @@ class Dashboard:
             "source": self.source.label,
             "location": self.location["name"],
             "poll_seconds": self.poll_s,
+            "camera": bool(self.cfg.get("camera", True)),
             "room": self.latest,
             "weather": self.weather,
             "weather_error": self.weather_error,
@@ -166,7 +167,7 @@ def make_handler(dash: Dashboard):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Security-Policy",
-                             "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:")
+                             "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob: mediastream:")
             self.end_headers()
             self.wfile.write(body)
 

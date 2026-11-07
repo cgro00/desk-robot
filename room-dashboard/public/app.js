@@ -207,6 +207,7 @@ function renderNow() {
   }
   renderAdvice(v, n.weather);
   renderScene(v, n.weather);
+  renderCameraChip(v);
   renderWeather(n);
   setText('updated', n.room && n.room.at ? `Senast uppdaterat ${hm(n.room.at)}` : '');
 }
@@ -441,6 +442,107 @@ function niceStep(raw) {
   return 10 * p;
 }
 
+// ── live camera (the browser reads the webcam directly) ───────────────────
+// Nothing is recorded or sent anywhere: the picture goes from the camera
+// straight into the <video> element on this page. Browsers only allow this on
+// http://127.0.0.1 / localhost (or https), and ask for permission once.
+const cam = { stream: null, want: false, deviceId: '', retried: false };
+function store(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode */ } }
+function recall(key) { try { return localStorage.getItem(key) || ''; } catch (e) { return ''; } }
+cam.want = recall('camera') === 'on';
+cam.deviceId = recall('cameraDevice');
+
+function cameraMessage(text) {
+  const m = $('camera-msg');
+  m.hidden = !text;
+  m.textContent = text || '';
+}
+function stopCamera() {
+  if (cam.stream) for (const t of cam.stream.getTracks()) t.stop();
+  cam.stream = null;
+  $('camera').srcObject = null;
+}
+async function startCamera() {
+  stopCamera();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    cameraMessage('Webbläsaren släpper inte fram kameran här. Öppna sidan via http://127.0.0.1:8790 (inte som fil).');
+    return;
+  }
+  cameraMessage('Startar kameran…');
+  const video = { width: { ideal: 1280 }, height: { ideal: 720 } };
+  if (cam.deviceId) video.deviceId = { exact: cam.deviceId };
+  try {
+    cam.stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+  } catch (e) {
+    if (cam.deviceId && (e.name === 'OverconstrainedError' || e.name === 'NotFoundError')) {
+      cam.deviceId = ''; store('cameraDevice', '');   // the saved camera is gone: take any
+      return startCamera();
+    }
+    cameraMessage({
+      NotAllowedError: 'Kameran är nekad. Klicka på kameraikonen i adressfältet, tillåt kameran och tryck på Kamera igen.',
+      NotFoundError: 'Ingen kamera hittades. Är C922 inkopplad?',
+      NotReadableError: 'Kameran används av ett annat program (t.ex. Zoom, Teams eller OBS). Stäng det och tryck på Kamera igen.',
+    }[e.name] || `Kunde inte starta kameran (${e.name}).`);
+    return;
+  }
+  if (!cam.want || document.hidden) { stopCamera(); return; }  // switched off while we waited
+  $('camera').srcObject = cam.stream;
+  cameraMessage('');
+  await listCameras();
+}
+// Names are only readable after permission is given, so list them now.
+async function listCameras() {
+  const select = $('camera-device');
+  const current = cam.stream && cam.stream.getVideoTracks()[0] ? cam.stream.getVideoTracks()[0].getSettings().deviceId : '';
+  const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+  // First time: prefer the Logitech C922 if it isn't the one the browser picked.
+  if (!cam.deviceId && !cam.retried) {
+    cam.retried = true;
+    const c922 = devices.find((d) => /c922/i.test(d.label));
+    if (c922 && c922.deviceId !== current) {
+      cam.deviceId = c922.deviceId; store('cameraDevice', c922.deviceId);
+      return startCamera();
+    }
+  }
+  select.replaceChildren();
+  devices.forEach((d, i) => {
+    const o = document.createElement('option');
+    o.value = d.deviceId;
+    o.textContent = d.label || `Kamera ${i + 1}`;
+    o.selected = d.deviceId === current;
+    select.appendChild(o);
+  });
+  select.hidden = devices.length < 2;
+}
+function setView(camera) {
+  cam.want = camera;
+  store('camera', camera ? 'on' : 'off');
+  $('show-room').setAttribute('aria-pressed', String(!camera));
+  $('show-camera').setAttribute('aria-pressed', String(camera));
+  $('camera-view').hidden = !camera;
+  $('room').style.display = camera ? 'none' : '';
+  if (!camera) $('camera-device').hidden = true;
+  if (camera) startCamera(); else stopCamera();
+}
+function renderCameraChip(v) {
+  const chip = $('camera-chip');
+  chip.replaceChildren();
+  const add = (text) => { const s = document.createElement('span'); s.textContent = text; chip.appendChild(s); };
+  if (v.temperature != null) add(`${fmt(v.temperature)}°`);
+  if (v.humidity != null) add(`${fmt(v.humidity, 0)} %`);
+  if (v.co2 != null) add(`${fmt(v.co2, 0)} ppm`);
+}
+$('show-room').addEventListener('click', () => setView(false));
+$('show-camera').addEventListener('click', () => setView(true));
+$('camera-device').addEventListener('change', (e) => {
+  cam.deviceId = e.target.value; store('cameraDevice', cam.deviceId); startCamera();
+});
+// Let go of the camera (and its light) while the tab is hidden.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopCamera();
+  else if (cam.want && !cam.stream) startCamera();
+});
+
 // ── wiring ─────────────────────────────────────────────────────────────────
 for (const b of document.querySelectorAll('.tabs button')) {
   b.addEventListener('click', () => {
@@ -457,6 +559,8 @@ tick();
 setInterval(tick, 1000);
 (async () => {
   await refreshNow();
+  if (state.now && state.now.camera === false) document.querySelector('.view-switch').hidden = true;
+  else if (cam.want) setView(true);
   await refreshHistory();
   renderNow(); // trends need the history
   setInterval(async () => { await refreshNow(); }, 30000);

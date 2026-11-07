@@ -1,0 +1,52 @@
+# ESPHome-konfiguration för en rumsgivare: DHT11 (från SunFounders
+# Universal Maker Sensor Kit) på ett ESP32-kort. Den skickar temperatur
+# och luftfuktighet till Home Assistant varje minut.
+#
+# Koppling (DHT11-modulen har tre stift; titta på texten på modulen):
+#   DHT11  +  / VCC   ->  ESP32 3V3
+#   DHT11  -  / GND   ->  ESP32 GND
+#   DHT11  S  / DATA  ->  ESP32 GPIO4  (märkt "4" eller "D4" på de flesta kort)
+#
+# Placera givaren en bit från datorn, elementet och fönstret, gärna i
+# brösthöjd. DHT11 är ungefärlig: ±2 °C och ±5 % luftfuktighet.
+#
+# Hemligheterna (!secret) fyller du i under "Secrets" i ESPHome-panelen i
+# Home Assistant. Se room-dashboard/README.md, avsnittet om sensorer.
+
+esphome:
+  name: rumsgivare
+  friendly_name: Rumsgivare
+
+esp32:
+  board: esp32dev   # vanliga ESP32-WROOM-32-kort; byt om ditt kort är ett annat
+
+logger:
+
+api:
+  encryption:
+    key: !secret rumsgivare_api_key
+
+ota:
+  - platform: esphome
+    password: !secret rumsgivare_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:   # om WiFi inte fungerar startar kortet ett eget nät att felsöka via
+    ssid: "Rumsgivare Fallback"
+    password: !secret rumsgivare_ap_password
+
+captive_portal:
+
+sensor:
+  - platform: dht
+    pin: GPIO4
+    model: DHT11
+    update_interval: 60s
+    temperature:
+      name: "Temperatur"          # blir sensor.rumsgivare_temperatur i Home Assistant
+      filters:
+        - offset: 0.0             # visar den fel? t.ex. -1.0 om den visar en grad för varmt
+    humidity:
+      name: "Luftfuktighet"       # blir sensor.rumsgivare_luftfuktighet

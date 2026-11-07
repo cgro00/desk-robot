@@ -193,6 +193,7 @@ class ServerTest(unittest.TestCase):
         self.assertTrue(now["demo"])
         self.assertEqual(now["title"], "Testrum")
         self.assertIn("co2", now["room"]["values"])
+        self.assertTrue(now["camera"])  # on unless config.json says "camera": false
         _, _, body = self.get("/api/history?hours=6")
         samples = json.loads(body)["samples"]
         self.assertGreater(len(samples), 60)

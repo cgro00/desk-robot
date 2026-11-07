@@ -94,11 +94,85 @@ Ange sökvägen i `file.path`. Tiden måste ha tidszon. Är filen äldre än
 `max_age_minutes` (15 som standard) visas värdena som saknade, så att ett
 stoppat skript syns som ett glapp i stället för ett fruset värde.
 
+## Livebild från webbkameran
+
+Tryck på **Kamera** uppe i rutan *Just nu* för att byta illustrationen mot
+en livebild, med temperatur och luftfuktighet ovanpå. Webbläsaren frågar en
+gång om sidan får använda kameran. Har du flera kameror väljs en Logitech
+C922 automatiskt om den finns, annars kan du välja i listan bredvid knappen.
+
+- Bilden går direkt från kameran till webbläsarfönstret. Den spelas inte in,
+  sparas inte och skickas inte till servern eller någon annan.
+- När du byter flik eller minimerar fönstret släpps kameran, och lampan på
+  den slocknar. Sidan minns om du senast valde *Kamera*.
+- Det fungerar bara när sidan öppnas via `http://127.0.0.1:8790`, inte när
+  `index.html` öppnas som fil.
+- Vill du inte ha knappen alls: sätt `"camera": false` i `config.json`.
+
+Visar den "Kameran används av ett annat program" är det oftast Zoom, Teams,
+OBS eller Logitech-programmet som håller i den.
+
+## Bygg en rumsgivare med SunFounder-satsen
+
+SunFounders *Universal Maker Sensor Kit* har en **DHT11**, som mäter
+temperatur och luftfuktighet. Satsen har inget eget WiFi, så givaren
+kopplas till ett **ESP32-kort** (ungefär 100 kr om du inte har ett) som
+skickar värdena trådlöst till Home Assistant med **ESPHome**. Dashboarden
+läser dem sedan från Home Assistant.
+
+```
+DHT11 ──3 sladdar──► ESP32 ──WiFi──► Home Assistant ──► dashboarden
+```
+
+**1. Koppla.** DHT11-modulen har tre stift. Satsen kan innehålla olika
+versioner av modulen, så läs texten på just din:
+
+| DHT11 | ESP32 |
+| --- | --- |
+| `+` eller `VCC` | `3V3` |
+| `-` eller `GND` | `GND` |
+| `S`, `OUT` eller `DATA` | `GPIO4` (märkt `4` eller `D4`) |
+
+**2. Installera ESPHome i Home Assistant.** *Inställningar → Tillägg →
+Tilläggsbutik*, sök på **ESPHome Device Builder**, installera, starta och
+slå på *Visa i sidofältet*. (Kör du Home Assistant i Docker utan tillägg kan
+ESPHome köras som en egen container med samma resultat.)
+
+**3. Skapa enheten.** I ESPHome: *+ New device*, döp den till
+`rumsgivare`, välj *ESP32*. Guiden skapar nycklar och WiFi-inställningar åt
+dig. Tryck sedan på *Edit* och klistra in `sensor:`-delen från
+[`esphome/rumsgivare.yaml`](esphome/rumsgivare.yaml) längst ned. Hela filen
+finns där som referens, med kommentarer.
+
+**4. Första installationen över USB.** Koppla ESP32-kortet till datorn med
+en USB-kabel. I ESPHome: *Install → Manual download → Factory format*.
+Öppna [web.esphome.io](https://web.esphome.io) i Chrome eller Edge, tryck
+*Connect*, välj kortet och installera filen du laddade ned. Senare ändringar
+skickas trådlöst.
+
+**5. Lägg till i Home Assistant.** Efter en minut dyker *Rumsgivare* upp
+under *Inställningar → Enheter och tjänster* som upptäckt. Tryck
+*Konfigurera*. Nu finns `sensor.rumsgivare_temperatur` och
+`sensor.rumsgivare_luftfuktighet`, och det är de namnen som redan står i
+`config.example.json`.
+
+**Bra att veta om DHT11:** den är ungefärlig (±2 °C, ±5 % fukt) och läser
+bara av en gång i sekunden som snabbast. Visar den fel jämfört med en
+termometer du litar på, justera `offset` i ESPHome-filen. Ställ den en bit
+från datorn, elementet och fönstret.
+
+**Koldioxid** kan DHT11 inte mäta. Eventuella gasgivare av MQ-typ i satsen
+reagerar på brandfarliga gaser och rök, inte på koldioxid, och ger inga
+pålitliga ppm-värden. För "dags att vädra"-rådet behövs en riktig
+CO2-givare, t.ex. **Sensirion SCD40/SCD41**, som kan sitta på samma ESP32
+(ESPHome har stöd för den). Fram till dess visar CO2-kortet "Ingen sensor
+kopplad".
+
 ## Vad sidan visar
 
 | Del | Innehåll |
 | --- | --- |
-| Rummet | En illustration av ett rum. Himlen i fönstret följer dygnet och vädret, lampan tänds när det är mörkt och luften blir disig när koldioxiden stiger. |
+| Rummet / Kamera | En illustration av ett rum, eller livebild från webbkameran. Himlen i fönstret följer dygnet och vädret, lampan tänds när det är mörkt och luften blir disig när koldioxiden stiger. |
 | Råd | Den viktigaste saken just nu, och ett konkret tips. |
 | Klimatkort | Temperatur, luftfuktighet och koldioxid med en färgmarkering (grön/gul/röd) och förändringen den senaste timmen. |
 | Väder | Just nu, dagens min/max, sol upp/ned och de kommande 12 timmarna med regnrisk. |
@@ -117,6 +191,7 @@ historiken undan som en egen fil i stället för att blandas med den nya.
 - Servern lyssnar bara på den här datorn (`127.0.0.1`). Andra enheter i
   nätverket når den inte.
 - Sidan hämtar inget från internet. Vädret hämtas av servern.
+- Kamerabilden lämnar aldrig webbläsarfönstret och sparas inte.
 - Bara siffror och tider sparas, på din dator.
 
 ## Vanliga problem
