@@ -7,6 +7,9 @@ latest work. A video matches the tagged version it was made with.
 
 - New 3D-printed pan/tilt neck: geared 360° pan, unrestricted tilt, flat
   head plate. Replaces the off-the-shelf SG90-style bracket.
+- New `room-dashboard/`: a standalone room dashboard (temperature,
+  humidity and CO2 from Home Assistant, Homey or a JSON file, plus the
+  weather from Open-Meteo and a clock). Does not need the robot.
 
 ## v1.0 - 2026-09-22
 

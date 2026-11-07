@@ -48,6 +48,10 @@ The firmware is deliberately simple: it draws the face, moves the servos,
 and streams audio and camera frames. All the judgement lives in `server/`.
 Nothing is billed while the robot is idle.
 
+**Also in this repo:** [`room-dashboard/`](room-dashboard/README.md), a
+standalone dashboard for your room (climate sensors from Home Assistant or
+Homey, the weather, and the time). It does not need the robot.
+
 ## Contents
 
 1. [What you need](#what-you-need)

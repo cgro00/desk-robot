@@ -1,0 +1,6 @@
+# Your sensors and tokens: never commit
+config.json
+# Recorded history
+data/
+readings.json
+__pycache__/

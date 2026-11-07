@@ -1,0 +1,30 @@
+{
+  "title": "Mitt rum",
+  "location": { "name": "Stockholm", "latitude": 59.33, "longitude": 18.07 },
+  "poll_seconds": 60,
+  "source": {
+    "type": "homeassistant",
+
+    "homeassistant": {
+      "url": "http://homeassistant.local:8123",
+      "token": "KLISTRA-IN-DIN-LONG-LIVED-ACCESS-TOKEN",
+      "entities": {
+        "temperature": "sensor.sovrum_temperature",
+        "humidity": "sensor.sovrum_humidity",
+        "co2": ""
+      }
+    },
+
+    "homey": {
+      "url": "http://192.168.1.50",
+      "token": "KLISTRA-IN-DIN-HOMEY-API-NYCKEL",
+      "devices": {
+        "temperature": { "device": "ENHETENS-ID", "capability": "measure_temperature" },
+        "humidity": { "device": "ENHETENS-ID", "capability": "measure_humidity" },
+        "co2": ""
+      }
+    },
+
+    "file": { "path": "readings.json", "max_age_minutes": 15 }
+  }
+}
