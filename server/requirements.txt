@@ -4,7 +4,7 @@ websockets==17.1
 certifi==2026.10.19         # root certs for the Fish Audio call
 faster-whisper==1.2.1   # local speech-to-text
 onnxruntime==1.29.0     # Silero VAD + Smart Turn end-of-turn models (brain/turn.py)
-sounddevice==0.5.6     # Mac microphone (fallback when the robot is offline)
+sounddevice==0.5.6     # this computer's microphone (fallback when the robot is offline)
 numpy==2.5.2
 opencv-contrib-python==5.0.0.93  # face tracking (YuNet model in models/); the edition mediapipe needs, so only one
                                  # OpenCV gets installed (two editions side by side break each other)

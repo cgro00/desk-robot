@@ -717,6 +717,14 @@
           <legend class="label"><span>Vision</span><span class="saved" data-saved="vision"></span></legend>
           <div class="set"><label class="check"><input type="checkbox" name="vision.every_question" aria-describedby="vqhint"> A picture with every question</label>
             <p class="hint" id="vqhint">While he's awake, so he knows what you're doing. Off = only when you ask what he sees. Either way the picture goes to the AI provider.</p></div>
+          <fieldset class="set"><legend class="k">He sees through</legend>
+            <div class="choices"><label><input type="radio" name="vision.camera" value="robot"> The robot's camera (nothing while it's away)</label>
+              <label><input type="radio" name="vision.camera" value="mac"> This computer's camera, while the robot is away</label></div>
+            <p class="hint">A connected robot's camera always wins. This computer's needs Camera permission for the app that runs the server (macOS: System Settings &gt; Privacy &amp; Security &gt; Camera); it stays off unless you choose it.</p>
+            <div class="set"><label class="k" for="localrot">This computer's picture turned</label>
+              <select id="localrot" name="vision.camera_rotate"><option value="0">0° (as the camera sees)</option><option value="90">90° clockwise</option>
+                <option value="180">180°</option><option value="270">270° clockwise</option></select>
+              <p class="hint">Only for this computer's camera — if his description of the room is on its side, turn it here. The robot's own "Camera picture turned" setting doesn't touch it.</p></div></fieldset>
           <fieldset class="set"><legend class="k">When he looks</legend>
             <div class="choices"><label><input type="radio" name="vision.snapshot" value="uxga"> Sharpest (1600×1200)</label>
               <label><input type="radio" name="vision.snapshot" value="xga"> Sharp (1024×768)</label>
@@ -1717,7 +1725,8 @@ const FaceKit = (() => {
     renderFocus(s.focus);
     const linked = !!s.robot, fresh = s.frame_age_s != null && s.frame_age_s < 3;
     $("link").textContent = linked ? "on WiFi" : "not connected"; $("link").className = "v" + (linked ? " good" : " warn");
-    $("fps").textContent = fresh ? s.fps + " fps" : "no signal"; $("fps").className = "v" + (fresh ? "" : " warn");
+    $("fps").textContent = fresh ? s.fps + " fps" + (s.camera === "mac" ? " · this computer" : "") : "no signal";
+    $("fps").className = "v" + (fresh ? "" : " warn");
     $("temp").textContent = s.temperature_c != null ? s.temperature_c.toFixed(1) + " °C" : "—";
     $("temp").className = "v" + (s.temperature_c > 75 ? " warn" : "");
     $("state").textContent = s.speaking ? "speaking" : s.thinking ? "thinking" : s.awake ? "awake" : "asleep";

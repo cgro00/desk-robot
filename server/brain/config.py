@@ -204,6 +204,14 @@ LIVE_VIEW_PORT = 8767   # the brain's own page + API. The launcher (server/launc
 LIVE_VIEW_BIND = "127.0.0.1"  # this computer only. "0.0.0.0" would show the page and camera to the whole LAN
                               # (the controls still answer this computer only).
 SEND_CAMERA_TO_BRAIN = True  # let Rocky see the camera at all (False = no picture ever goes to the model)
+# Where the pictures come from while no robot is connected. "robot" (the default): no robot, no camera. "mac":
+# this computer's camera, on any system (dashboard: Settings > Vision; CAMERA_LOCAL_INDEX picks a second
+# camera, None = the default). While a robot IS connected its camera always wins, so this only matters running
+# the server alone. The value is "mac" for consistency with the mic's MIC_SOURCE (same wording, same idea).
+CAMERA_SOURCE = (os.environ.get("CAMERA_SOURCE") or "robot").strip().lower()
+CAMERA_LOCAL_INDEX = (os.environ.get("CAMERA_LOCAL_INDEX") or "").strip() or None  # cv2 camera number; None = default
+CAMERA_LOCAL_ROTATE = 0      # turn THIS computer's pictures 0/90/180/270 deg (the robot's CAMERA_ROTATE is its own)
+CAMERA_LOCAL_MIRROR = False  # and mirror them left-right (webcam pictures already come out the right way round)
 # Seeing better (dashboard: Settings > Vision).
 #   VISION_EVERY_QUESTION  attach the camera's picture to every question while he's awake, not only ones about
 #                          seeing, so he knows what you're doing (a small picture costs ~100 tokens, a sharp one

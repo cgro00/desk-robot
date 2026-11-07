@@ -56,6 +56,12 @@ SCHEMA: dict[str, dict[str, tuple]] = {
     "vision": {
         "every_question":   (True, "bool", None),        # a picture with every question while awake
         "snapshot":         ("xga", "choice", ("off", "svga", "xga", "uxga")),  # sharp still when he looks
+        # where pictures come from while no robot is connected: "robot" = none, "mac" = this computer's camera
+        # (a running robot's camera always wins). `camera_index` picks one by number; empty = the default.
+        # `camera_rotate` turns THIS computer's pictures only (its lens isn't on its side like the V2 head's).
+        "camera":           ("robot", "choice", ("robot", "mac")),
+        "camera_index":     ("", "str", 40),
+        "camera_rotate":    (0, "choice", (0, 90, 180, 270)),
         "perception":       (True, "bool", None),        # local detectors: faces, and hands for a wave
         "gestures":         (True, "bool", None),        # a wave wakes him
         "stream":           ("vga", "choice", ("qvga", "vga")),   # the camera stream: 320x240 or 640x480

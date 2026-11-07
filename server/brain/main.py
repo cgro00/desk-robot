@@ -51,7 +51,7 @@ from .body import Body
 from .dance import Dancer, length as dance_length
 from .thinking import Interrupted, RobotBrain
 from .ears import Ears, normalize, strip_wake_word
-from .eyes import Eyes, rotate_jpeg
+from .eyes import Eyes, LocalCamera, rotate_jpeg
 from .perception import Perception
 from .tracker import Tracker
 
@@ -70,6 +70,8 @@ speech_started = asyncio.Event()  # the human began a new turn (set by the ears)
 awake_until = 0.0  # while time.time() < this, he's awake: no wake word needed
 robot_speak_done = asyncio.Event()  # robot finished playing the last reply
 eyes = Eyes()
+camera: LocalCamera | None = None  # this computer's camera, running because the vision settings asked for it
+                                  # (a connected robot's camera always wins: see pick_camera_source)
 head_moves: asyncio.Queue[tuple[float | None, float | None, bool]] = asyncio.Queue()
 tracker: Tracker | None = None
 perception: Perception | None = None
@@ -144,6 +146,30 @@ def pick_mic_source() -> None:
             print(f"(no Mac mic: {ears.mac_error} — nothing is listening until the robot connects)")
         else:
             print("listening through the robot mic" if source == "robot" else f"listening through \"{ears.device_name}\"")
+
+
+def pick_camera_source() -> None:
+    """Start or stop this computer's camera (Settings > Vision). It runs while no robot is connected; the robot's
+    own camera always wins while it's here. cv2 opens on a thread: the first camera wake-up can take a second."""
+    global camera
+    want = (config.CAMERA_SOURCE == "mac" and robot_socket is None and config.SEND_CAMERA_TO_BRAIN)
+    if not want:
+        if camera is not None:
+            camera.stop()
+            camera = None
+            print("camera: stopped (the robot's camera is back / it's off)")
+        return
+    if camera is None:
+        camera = LocalCamera(eyes)
+    idx = (config.CAMERA_LOCAL_INDEX or "").strip()
+    camera.index = int(idx) if idx.lstrip("-").isdigit() else None
+    if not camera.running:
+        try:
+            name = camera.start()
+            print(f"camera: \"{name}\" — Rocky sees through this computer until the robot connects")
+        except Exception as e:
+            camera.error = str(e)
+            print(f"(camera: {e})")
 
 
 # Why the robot's WiFi last dropped (the reason code its WiFi stack reported: 802.11's, or ESP-IDF's 200+).
@@ -236,6 +262,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     robot_peer, robot_heard_at = peer, time.time()
     print(f"robot connected! (fw {hello.get('fw', '?')}, {peer}{robot_health(hello)})")
     pick_mic_source()
+    await asyncio.get_running_loop().run_in_executor(None, pick_camera_source)   # opening a camera can take a moment
     await update_robot_mic()
     await send_to_robot({"type": "stream", "on": True, "fps": config.CAMERA_FPS, "size": config.CAMERA_STREAM_SIZE})
     # No idle head glances: they fight deliberate looks. The eyes still move.
@@ -299,6 +326,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
             quiet = time.time() - robot_heard_at
             print("robot disconnected" + (f" (nothing from it for {quiet:.0f} s first)" if quiet >= 3 else ""))
             pick_mic_source()
+            await asyncio.get_running_loop().run_in_executor(None, pick_camera_source)
 
 
 async def handle_console_line(line: str) -> bool:
@@ -351,6 +379,8 @@ async def handle_console_line(line: str) -> bool:
             stop_listening()
     elif cmd == "mic":
         await mic_meter()
+    elif cmd == "camera":
+        await _console_command("camera_on", {"on": arg != "off"})   # this computer's camera, like the dashboard
     elif cmd == "say":
         if arg:
             await say(arg)
@@ -362,7 +392,7 @@ async def handle_console_line(line: str) -> bool:
         except ValueError:
             print("usage: volume <0.0-1.0>")
     else:
-        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | track on|off | emo <name> | gesture <name> | pan <deg> | tilt <deg> | status | quit")
+        print("commands: ask <q> | say <text> | volume <0-1> | listen | mic | camera on|off | track on|off | emo <name> | gesture <name> | pan <deg> | tilt <deg> | status | quit")
     return True
 
 
@@ -398,6 +428,16 @@ async def look(args: dict) -> tuple:
         return ("Say where to look: left, right, up, down, level, or center.", None)
     pan = max(-config.TRACK_PAN_LIMIT, min(config.TRACK_PAN_LIMIT, pan))
     tilt = max(config.TRACK_TILT_MIN, min(config.TRACK_TILT_MAX, tilt))
+
+    if robot_socket is None:
+        # No robot: the head can't turn. With this computer's camera on (Settings > Vision) he still gets a fresh
+        # picture from here; the reply says the head stayed put so he doesn't claim a turn.
+        if not see:
+            return ("The robot isn't connected, so your head cannot turn. No picture taken. Say so.", None, True)
+        jpeg = await best_picture(since=time.time() - 0.05, wait=1.5)
+        return ("The robot isn't connected, so your head stayed put." +
+                (" Fresh picture from this computer's camera attached." if jpeg else
+                 " No camera is running — say you cannot see right now."), jpeg)
 
     if tracker is not None and tracker.enabled:
         await set_tracking(False, announce=False)  # tracking would drag the head back
@@ -601,6 +641,10 @@ def apply_settings(s: dict) -> None:
     v = s["vision"]
     config.VISION_EVERY_QUESTION = v["every_question"]
     config.SNAPSHOT_SIZE = "" if v["snapshot"] == "off" else v["snapshot"]
+    # the dashboard only overrides CAMERA_SOURCE from .env once it's actually been touched ("robot" there = untouched)
+    config.CAMERA_SOURCE = v["camera"] if v["camera"] != "robot" else (config.CAMERA_SOURCE or "robot")
+    config.CAMERA_LOCAL_INDEX = v["camera_index"] or (os.environ.get("CAMERA_LOCAL_INDEX") or "").strip() or None
+    config.CAMERA_LOCAL_ROTATE = v["camera_rotate"]
     config.PERCEPTION = v["perception"]
     config.GESTURE_REACTIONS = v["gestures"]
     computer.controller.configure(s["computer"])
@@ -628,6 +672,7 @@ async def reload_settings() -> None:
     """The launcher saved the settings file: apply it and send the robot its part."""
     apply_settings(settings.load())
     await switch_mic()
+    await asyncio.get_running_loop().run_in_executor(None, pick_camera_source)
     await send_to_robot(settings.robot_payload(current_settings))
     await send_face_pack()
     await send_to_robot({"type": "volume", "level": speaker_volume})
@@ -667,6 +712,18 @@ async def mic_watch() -> None:
             print(f"computer mic: \"{ears.device_name}\" is plugged in now")
             pick_mic_source()
             await update_robot_mic()
+
+
+async def camera_watch() -> None:
+    """This computer's camera was asked for but couldn't be opened (no permission yet, camera unplugged): try again every
+    15 s while no robot is connected, so granting access fixes itself without a restart."""
+    while True:
+        await asyncio.sleep(15)
+        if robot_socket is not None or config.CAMERA_SOURCE != "mac":
+            continue
+        if camera is not None and (camera.running or camera.device_name):
+            continue   # running, or waiting on a slow wake-up we didn't ask for
+        await asyncio.get_running_loop().run_in_executor(None, pick_camera_source)
 
 
 async def send_face_pack() -> None:
@@ -1010,20 +1067,31 @@ class SpokenReply:
 # ── Seeing ───────────────────────────────────────────────────────────────────
 
 async def request_snapshot(force: bool = False) -> None:
-    """Ask the robot for one sharp still (SNAPSHOT_SIZE). One request in flight at a time unless forced."""
+    """Ask for one sharp still (SNAPSHOT_SIZE): the robot takes it, or this computer's camera if that's what he's
+    seeing through. One request in flight at a time unless forced."""
     global snapshot_asked_at
-    if robot_socket is None or not config.SNAPSHOT_SIZE or not config.SEND_CAMERA_TO_BRAIN:
+    if not config.SNAPSHOT_SIZE or not config.SEND_CAMERA_TO_BRAIN:
+        return
+    if robot_socket is None and camera is None:
         return
     if not force and time.time() - snapshot_asked_at < 1.0:
         return
     snapshot_asked_at = time.time()
     snapshot_arrived.clear()
-    await send_to_robot({"type": "snapshot", "size": config.SNAPSHOT_SIZE})
+    if robot_socket is not None:
+        await send_to_robot({"type": "snapshot", "size": config.SNAPSHOT_SIZE})
+    else:
+        loop = asyncio.get_running_loop()
+        jpeg = await loop.run_in_executor(None, camera.take_snapshot, config.SNAPSHOT_SIZE, time.time())
+        if jpeg:
+            on_snapshot(jpeg)
 
 
 def on_snapshot(jpeg: bytes) -> None:
     global snapshot
-    snapshot = (rotate_jpeg(jpeg, config.CAMERA_ROTATE, config.CAMERA_MIRROR), time.time())
+    deg, mirror = ((config.CAMERA_LOCAL_ROTATE, config.CAMERA_LOCAL_MIRROR) if robot_socket is None
+                   else (config.CAMERA_ROTATE, config.CAMERA_MIRROR))   # whose camera took it
+    snapshot = (rotate_jpeg(jpeg, deg, mirror), time.time())
     snapshot_arrived.set()
 
 
@@ -1031,7 +1099,13 @@ async def best_picture(since: float | None = None, wait: float = 1.0) -> bytes |
     """The sharpest picture taken after `since` (default: the last 4 s): a snapshot, waiting up to `wait` for one
     that's on its way (asking for one if none is), else the newest stream frame."""
     since = time.time() - 4.0 if since is None else since
-    if config.SNAPSHOT_SIZE and robot_socket is not None:
+    if robot_socket is None:
+        # Nothing asks for a computer snapshot on its own schedule (no "you stopped talking" moment to take it at),
+        # so the fresh stream frame comes first; the snapshot path still answers `look`.
+        stream = eyes.latest()
+        if stream is not None:
+            return stream
+    if config.SNAPSHOT_SIZE and (robot_socket is not None or camera is not None):
         if snapshot[1] < since:
             if snapshot_asked_at < since:
                 await request_snapshot(force=True)
@@ -1214,6 +1288,11 @@ def console_state() -> dict:
         "volume": speaker_volume,
         "speaker_out": speaker_out,
         "camera_rotate": config.CAMERA_ROTATE,
+        # whose camera he's seeing through now, and this computer's camera's state (LocalCamera.error after a
+        # failed open: no permission, unplugged)
+        "camera": "robot" if robot_socket is not None else "mac" if camera is not None and camera.running else None,
+        "camera_device": camera.device_name if camera is not None and camera.running else None,
+        "camera_error": camera.error if camera is not None and not camera.running else None,
         "limits": {"pan": config.TRACK_PAN_LIMIT, "tilt": [config.TRACK_TILT_MIN, config.TRACK_TILT_MAX]},
         "tuning": {k: getattr(config, k) for k in TUNABLE},
         "speech": speech_now.snapshot() if speech_now is not None else None,   # his words as he says them
@@ -1323,6 +1402,15 @@ async def _console_command(action: str, payload: dict) -> dict:
         config.CAMERA_ROTATE = deg
         persist("rocky", "camera_rotate", deg)
         print(f"console: camera turned {deg} deg clockwise")
+    elif action == "camera_on":
+        # the dashboard's "This computer's camera": opt in (or out) without editing .env; kept in settings.json
+        on = bool(payload.get("on", True))
+        config.CAMERA_SOURCE = "mac" if on else "robot"
+        persist("vision", "camera", config.CAMERA_SOURCE)
+        await asyncio.get_running_loop().run_in_executor(None, pick_camera_source)
+        return {"camera": config.CAMERA_SOURCE,
+                "camera_device": camera.device_name if camera is not None and camera.running else None,
+                "camera_error": camera.error if camera is not None and not camera.running else None}
     elif action == "track":
         on = bool(payload.get("on", True))
         if on and time.time() >= awake_until:
@@ -1618,6 +1706,7 @@ async def main() -> None:
         print("WARNING: ROBOT_TOKEN is not set in server/.env — the robot will be refused")
     global tracker, brain, main_loop, perception, body, dancer
     apply_settings(settings.load())
+    pick_camera_source()   # opens this computer's camera if the vision settings asked for it (off by default)
     loop = asyncio.get_running_loop()
     main_loop = loop
     brain = RobotBrain(ABILITIES, quick=computer.QUICK, extra_tools=lambda: (
@@ -1651,6 +1740,7 @@ async def main() -> None:
         doze_task = asyncio.create_task(doze_loop())
         head_task = asyncio.create_task(head_loop())
         mic_task = asyncio.create_task(mic_watch())
+        cam_task = asyncio.create_task(camera_watch())
         if config.LISTEN_ON_START:
             await start_listening()
         try:
@@ -1660,6 +1750,7 @@ async def main() -> None:
             doze_task.cancel()
             head_task.cancel()
             mic_task.cancel()
+            cam_task.cancel()
             if ears is not None:
                 stop_listening()
 
