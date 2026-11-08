@@ -1,7 +1,10 @@
-"""Eyes: the robot's camera stream, and a live-view page for the browser.
+"""Eyes: a camera stream (the robot's, or this computer's), and a live-view
+page for the browser.
 
 The robot sends one JPEG per binary frame (type byte 0x02). We keep only the
-newest. A tiny HTTP server (standard library, its own thread) serves:
+newest. Settings > Vision can instead run this computer's camera through
+`LocalCamera`, which pushes frames here the same way. A tiny HTTP server
+(standard library, its own thread) serves:
 
   /          the dashboard page (brain/dashboard.html): what Rocky sees and
              hears, plus controls for his head, face, voice and sleep. The
@@ -20,8 +23,10 @@ newest. A tiny HTTP server (standard library, its own thread) serves:
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import json
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -53,6 +58,132 @@ def rotate_jpeg(jpeg: bytes, deg: int, mirror: bool = False) -> bytes:
     return out.tobytes() if ok else jpeg
 
 
+# The Vision settings' picture sizes, as pixels.
+_SIZES = {"svga": (800, 600), "xga": (1024, 768), "uxga": (1600, 1200)}
+
+
+def _cv2_backend() -> int:
+    """The system's own camera API, so this camera works wherever the server runs: AVFoundation on
+    macOS, DirectShow on Windows, V4L2 on Linux (cv2's auto-probe is noisy and slow when nothing is there)."""
+    import cv2
+
+    name = {"darwin": "CAP_AVFOUNDATION", "win32": "CAP_DSHOW"}.get(sys.platform, "CAP_V4L2")
+    return getattr(cv2, name, 0)   # CAP_ANY if the wheel predates the constant
+
+
+class LocalCamera:
+    """This computer's camera as a frame source, for running the server on its
+    own (dashboard: Settings > Vision > "This computer's camera"). Pushes JPEGs
+    into Eyes the way the robot's stream frames do, and takes the sharp stills
+    the robot would. Works on macOS, Windows and Linux: cv2 picks the system's
+    camera API (AVFoundation / DirectShow / V4L2). cv2 is only touched while
+    running, so this file stays importable without OpenCV."""
+
+    def __init__(self, eyes: "Eyes") -> None:
+        self.eyes = eyes
+        self.index = None            # None = the system default camera
+        self.device_name = ""
+        self.error: str | None = None
+        self.busy = False            # a head move is taking its picture: wait before re-grabbing
+        self._capture = None
+        self._jpeg: bytes = b""      # newest full-size frame (a snapshot re-encodes this)
+        self._at = 0.0               # time.time() of that frame
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._want_high = False      # a sharp grab was asked for while the loop was at stream size
+
+    @property
+    def running(self) -> bool:
+        return self._thread is not None and not self._stop.is_set()
+
+    # ── the loop ────────────────────────────────────────────────────────────
+    def start(self) -> str:
+        """Open the camera and start pushing frames. Raises RuntimeError with a friendly
+        reason when there is no camera to open (nothing is connected yet, no permission)."""
+        import cv2
+
+        cap = cv2.VideoCapture(self.index if self.index is not None else 0, _cv2_backend())
+        if not cap.isOpened():
+            raise RuntimeError("no camera could be opened (is one plugged in"
+                               + (", and is this app allowed to use the camera: System Settings > Privacy "
+                                  "& Security > Camera?)" if sys.platform == "darwin" else "?)"))
+        self._capture = cap
+        self.device_name = f"camera {self.index if self.index is not None else 0}"
+        self.error = None
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return self.device_name
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+        if self._capture is not None:
+            with contextlib.suppress(Exception):
+                self._capture.release()
+            self._capture = None
+        self._jpeg = b""
+
+    def _run(self) -> None:
+        import cv2
+
+        self._last_frame = time.time()
+        high = (1280, 720)
+        while not self._stop.is_set():
+            want = high if (self._want_high or not config.CAMERA_STREAM_SIZE) else \
+                _SIZES.get(config.CAMERA_STREAM_SIZE, (640, 480))
+            if self._capture.get(cv2.CAP_PROP_FRAME_WIDTH) != want[0]:
+                self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, want[0])
+                self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, want[1])
+            ok, frame = self._capture.read()
+            if not ok:
+                # A phone-as-webcam or Continuity Camera device can take a couple of seconds to hand over its
+                # first frame: only say something once the stream really has gone quiet.
+                if time.time() - self._last_frame > 5.0:
+                    self.error = "the camera stopped sending frames"
+                if self._stop.wait(1.0):
+                    break
+                continue
+            self._last_frame = time.time()
+            self._want_high = False
+            now = time.time()
+            full = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            small = cv2.resize(full, (320, 240), interpolation=cv2.INTER_AREA)
+            ok, buf = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            if ok:
+                self.eyes.push_frame(buf.tobytes(), "mac")
+            ok, big = cv2.imencode(".jpg", full, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            if ok:
+                self._jpeg, self._at = big.tobytes(), now
+            self._stop.wait(0.1)   # ~10 fps, like the robot's stream
+
+    # ── snapshots ───────────────────────────────────────────────────────────
+    def take_snapshot(self, size_key: str, since: float) -> bytes:
+        """The first full-size frame taken after `since`, at the settings' picture size ("" = as grabbed).
+        Runs in main's thread pool — cv2.read blocks, so never on the event loop."""
+        self._want_high = True
+        deadline = time.time() + 2.5
+        while self._at < since and time.time() < deadline:
+            time.sleep(0.05)
+        if self._at < since or not self._jpeg:
+            return b""
+        jpeg = self._jpeg
+        want = _SIZES.get(size_key)
+        if want is not None:
+            import cv2
+            import numpy as np
+            img = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
+            if img is not None:
+                ok, out = cv2.imencode(".jpg", cv2.resize(img, want, interpolation=cv2.INTER_AREA),
+                                       [cv2.IMWRITE_JPEG_QUALITY, 92])
+                if ok:
+                    jpeg = out.tobytes()
+        return jpeg
+
+
+
 class Eyes:
     def __init__(self) -> None:
         self.jpeg: bytes = b""          # newest raw frame from the robot
@@ -73,8 +204,12 @@ class Eyes:
         self._cond = threading.Condition()
 
     # ── robot → server ──────────────────────────────────────────────────────
-    def push_frame(self, jpeg: bytes) -> None:
-        jpeg = rotate_jpeg(jpeg, config.CAMERA_ROTATE, config.CAMERA_MIRROR)
+    def push_frame(self, jpeg: bytes, source: str = "robot") -> None:
+        # The robot's camera sits on its side in the V2 head (CAMERA_ROTATE); this computer's camera has its own
+        # turn setting, since a laptop's lens is already upright.
+        deg, mirror = ((config.CAMERA_LOCAL_ROTATE, config.CAMERA_LOCAL_MIRROR) if source == "mac"
+                       else (config.CAMERA_ROTATE, config.CAMERA_MIRROR))
+        jpeg = rotate_jpeg(jpeg, deg, mirror)
         now = time.time()
         with self._cond:
             self.jpeg = jpeg

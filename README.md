@@ -238,7 +238,10 @@ is useful whenever you want to test the body alone.
 ## Set up the brain on your computer
 
 The brain works without the robot: it uses your computer's microphone and
-speaker until the robot connects. Get it talking first.
+speaker until the robot connects. It can see through your computer's camera
+too while the robot is away — opt in with Settings > Vision
+("He sees through: this computer's camera") or `CAMERA_SOURCE=mac` in
+`server/.env`; a connected robot's camera always wins. Get it talking first.
 
 ```bash
 cd server
@@ -417,6 +420,13 @@ also watch the stream a few times a second:
 The dashboard's Live tab shows what they notice (with boxes on the camera
 view), and Settings > Vision turns them on or off. The models (about 12 MB)
 download on the first start, pinned and checksummed.
+
+Running the server on its own? Settings > Vision can point him at this
+computer's camera ("He sees through: this computer's camera", or
+`CAMERA_SOURCE=mac` in `server/.env`): the same stream, snapshots and
+detectors run from this computer until the robot connects, and switch back by
+themselves. macOS asks once for Camera permission for the app that runs the
+server. Without it, or without the option, he honestly says he can't see.
 
 ### The clock screen
 
@@ -712,6 +722,12 @@ what Rocky is told he can do. A different screen driver goes near the top of
   microphone privacy setting for desktop apps. Run `mic` in the server console
   for a level meter. If you have several inputs, pick one under "He listens
   through" in the dashboard's settings.
+- **He says he can't see, running the server alone.** The computer's camera
+  is off by default: turn it on under "He sees through" in Settings > Vision
+  (or `CAMERA_SOURCE=mac` in `server/.env`). If the server console reports a
+  camera error, allow Camera access for the app that runs the server
+  (macOS: System Settings, Privacy & Security, Camera) — it retries by
+  itself. `camera on` / `camera off` in the server console switch it too.
 - **"Brain has no key."** `LLM_API_KEY` is empty, or belongs to a different
   provider than `LLM_BASE_URL`.
 - **He answers in the computer's voice.** `FISH_AUDIO_API_KEY` is missing
