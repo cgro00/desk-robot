@@ -114,59 +114,110 @@ OBS eller Logitech-programmet som håller i den.
 
 ## Bygg en rumsgivare med SunFounder-satsen
 
-SunFounders *Universal Maker Sensor Kit* har en **DHT11**, som mäter
-temperatur och luftfuktighet. Satsen har inget eget WiFi, så givaren
-kopplas till ett **ESP32-kort** (ungefär 100 kr om du inte har ett) som
-skickar värdena trådlöst till Home Assistant med **ESPHome**. Dashboarden
-läser dem sedan från Home Assistant.
+SunFounders *Universal Maker Sensor Kit* har inget eget WiFi, så modulerna
+kopplas till ett **ESP32-C3-kort** som skickar värdena trådlöst till Home
+Assistant med **ESPHome**. Dashboarden läser dem sedan från Home Assistant.
 
 ```
-DHT11 ──3 sladdar──► ESP32 ──WiFi──► Home Assistant ──► dashboarden
+moduler ──sladdar──► ESP32-C3 ──WiFi──► Home Assistant ──► dashboarden
 ```
 
-**1. Koppla.** DHT11-modulen har tre stift. Satsen kan innehålla olika
-versioner av modulen, så läs texten på just din:
+### Vilka moduler passar ett rum
 
-| DHT11 | ESP32 |
+| Modul i satsen | Mäter | Värd att koppla? |
+| --- | --- | --- |
+| **BMP280** | temperatur (±1 °C) och lufttryck | Ja. Bästa temperaturen i satsen. |
+| **DHT11** | luftfuktighet (±5 %) och temperatur (±2 °C) | Ja, för fukten. |
+| **Fotoresistor** | hur ljust det är, relativt | Ja. Visar om lampan är tänd eller det blivit mörkt. Inte lux. |
+| **PIR HC-SR501** | rörelse / närvaro | Ja. Bra för "någon är i rummet". |
+| **OLED SSD1306** | (skärm) | Valfritt. Visar värdena direkt på givaren. |
+| DS18B20 | temperatur | Behövs inte när du har BMP280. |
+| MQ2 gas/rök | brandfarlig gas, rök | Nej. Mäter inte koldioxid, drar mycket ström och dess 5 V-signal kan skada C3:an. |
+| HC-SR04, MPU6050 m.fl. | avstånd, rörelse i 3D | Inte för rumsklimat. |
+
+SunFounder kallar BMP280-modulen "Temperature, Humidity & Pressure", men
+BMP280-chippet mäter inte fukt. Därför tar vi fukten från DHT11. Står det
+`Wrong chip ID` i ESPHome-loggen har du en BME280 i stället, som mäter fukt
+också: byt då `bmp280_i2c` mot `bme280_i2c` i filen.
+
+### 1. Koppla
+
+Siffrorna är GPIO-nummer. På en *ESP32-C3 SuperMini* och Espressifs
+*DevKitM-1* står de tryckta vid stiften. På en *Seeed XIAO ESP32C3* står
+D-namnet, se kolumnen längst till höger. Satsen kan innehålla olika versioner
+av modulerna, så läs texten på just dina.
+
+| Modul | Modulens stift | ESP32-C3 | XIAO ESP32C3 |
+| --- | --- | --- | --- |
+| BMP280 | VCC / GND | 3V3 / GND | 3V3 / GND |
+| | SDA | GPIO6 | D4 |
+| | SCL | GPIO7 | D5 |
+| DHT11 | `+` / `-` | 3V3 / GND | 3V3 / GND |
+| | `S` / DATA | GPIO10 | D10 |
+| Fotoresistor | VCC / GND | **3V3** / GND | 3V3 / GND |
+| | AO | GPIO3 | D1 |
+| PIR HC-SR501 | VCC / GND | **5V** / GND | 5V / GND |
+| | OUT | GPIO4 | D2 |
+
+- PIR-modulen behöver 5 V som ström, men signalen den skickar är 3,3 V och
+  tål C3:an. Allt annat ska ha **3V3**, aldrig 5V.
+- Använd inte GPIO2, 8 eller 9 (styr hur kortet startar), 18/19 (USB) eller
+  20/21 (seriellporten) till moduler.
+- ESP32-C3 blir varm. Låt temperaturgivarna sitta några centimeter från
+  kortet på sladdar, annars visar de för varmt.
+- Börja gärna med en modul i taget och kontrollera att den fungerar.
+
+### 2. Installera ESPHome i Home Assistant
+
+*Inställningar → Tillägg → Tilläggsbutik*, sök på **ESPHome Device
+Builder**, installera, starta och slå på *Visa i sidofältet*. (Kör du Home
+Assistant i Docker utan tillägg kan ESPHome köras som en egen container.)
+
+### 3. Skapa enheten
+
+I ESPHome: *+ New device*, döp den till `rumsgivare` och välj *ESP32-C3*.
+Guiden skapar WiFi-inställningar och nycklar åt dig. Tryck sedan på *Edit*
+och klistra in delarna `i2c:`, `sensor:` och `binary_sensor:` från
+[`esphome/rumsgivare.yaml`](esphome/rumsgivare.yaml) längst ned. Ta bort
+blocken för moduler du inte kopplat in. Hela filen finns där som referens,
+kontrollerad med ESPHome 2026.10.
+
+### 4. Första installationen över USB
+
+Koppla C3:an till datorn med en USB-kabel som klarar data (inte bara
+laddning). I ESPHome: *Install → Manual download → Factory format*. Öppna
+[web.esphome.io](https://web.esphome.io) i Chrome eller Edge, tryck
+*Connect*, välj kortet och installera filen. Senare ändringar skickas
+trådlöst.
+
+Syns inget kort i listan: håll ned knappen **BOOT** (eller **B**) medan du
+sätter i USB-kabeln, och försök igen.
+
+### 5. Lägg till i Home Assistant
+
+Efter en minut dyker *Rumsgivare* upp under *Inställningar → Enheter och
+tjänster* som upptäckt. Tryck *Konfigurera*. Då finns:
+
+| Entitet | Används av dashboarden |
 | --- | --- |
-| `+` eller `VCC` | `3V3` |
-| `-` eller `GND` | `GND` |
-| `S`, `OUT` eller `DATA` | `GPIO4` (märkt `4` eller `D4`) |
+| `sensor.rumsgivare_temperatur` | ja (redan i `config.example.json`) |
+| `sensor.rumsgivare_luftfuktighet` | ja (redan i `config.example.json`) |
+| `sensor.rumsgivare_lufttryck` | inte än, men syns i Home Assistant |
+| `sensor.rumsgivare_ljus` | inte än |
+| `binary_sensor.rumsgivare_rorelse` | inte än |
 
-**2. Installera ESPHome i Home Assistant.** *Inställningar → Tillägg →
-Tilläggsbutik*, sök på **ESPHome Device Builder**, installera, starta och
-slå på *Visa i sidofältet*. (Kör du Home Assistant i Docker utan tillägg kan
-ESPHome köras som en egen container med samma resultat.)
+**Kontrollera ljusgivaren:** håll handen över den. Procenten ska sjunka.
+Stiger den i stället, ta bort raden `pct = 100.0f - pct;` i filen.
 
-**3. Skapa enheten.** I ESPHome: *+ New device*, döp den till
-`rumsgivare`, välj *ESP32*. Guiden skapar nycklar och WiFi-inställningar åt
-dig. Tryck sedan på *Edit* och klistra in `sensor:`-delen från
-[`esphome/rumsgivare.yaml`](esphome/rumsgivare.yaml) längst ned. Hela filen
-finns där som referens, med kommentarer.
+**Justera temperaturen** med `offset` i filen om den skiljer sig från en
+termometer du litar på.
 
-**4. Första installationen över USB.** Koppla ESP32-kortet till datorn med
-en USB-kabel. I ESPHome: *Install → Manual download → Factory format*.
-Öppna [web.esphome.io](https://web.esphome.io) i Chrome eller Edge, tryck
-*Connect*, välj kortet och installera filen du laddade ned. Senare ändringar
-skickas trådlöst.
+### Koldioxid
 
-**5. Lägg till i Home Assistant.** Efter en minut dyker *Rumsgivare* upp
-under *Inställningar → Enheter och tjänster* som upptäckt. Tryck
-*Konfigurera*. Nu finns `sensor.rumsgivare_temperatur` och
-`sensor.rumsgivare_luftfuktighet`, och det är de namnen som redan står i
-`config.example.json`.
-
-**Bra att veta om DHT11:** den är ungefärlig (±2 °C, ±5 % fukt) och läser
-bara av en gång i sekunden som snabbast. Visar den fel jämfört med en
-termometer du litar på, justera `offset` i ESPHome-filen. Ställ den en bit
-från datorn, elementet och fönstret.
-
-**Koldioxid** kan DHT11 inte mäta. Eventuella gasgivare av MQ-typ i satsen
-reagerar på brandfarliga gaser och rök, inte på koldioxid, och ger inga
-pålitliga ppm-värden. För "dags att vädra"-rådet behövs en riktig
-CO2-givare, t.ex. **Sensirion SCD40/SCD41**, som kan sitta på samma ESP32
-(ESPHome har stöd för den). Fram till dess visar CO2-kortet "Ingen sensor
-kopplad".
+Ingen modul i satsen mäter koldioxid. För "dags att vädra"-rådet behövs en
+riktig CO2-givare, t.ex. **Sensirion SCD40/SCD41**, som kan sitta på samma
+I2C-sladdar som BMP280 (ESPHome har stöd för den). Fram till dess visar
+CO2-kortet "Ingen sensor kopplad".
 
 ## Vad sidan visar
 
