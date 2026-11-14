@@ -47,6 +47,7 @@ void Camera::restart(const char* why) {
   vTaskDelay(pdMS_TO_TICKS(100));
   ok_ = initSensor();
   restarts_ = restarts_ + 1;
+  failStreak_ = ok_ ? 0 : failStreak_ + 1;
   lastGoodMs_ = lastInitTryMs_ = millis();
   Serial.printf("camera: %s -> restart %s (#%u)\n", why, ok_ ? "ok" : "failed", static_cast<unsigned>(restarts_));
 }
@@ -178,7 +179,9 @@ void Camera::task() {
   for (;;) {
     uint32_t now = millis();
     if (!ok_) {                                   // not up yet (or a restart failed): retry every 3 s
-      if (now - lastInitTryMs_ >= 3000) restart("not running");
+      // A camera that isn't there (unplugged, broken Sense board) fails every probe, and each failed probe
+      // floods the serial log. After five misses in a row, only try once a minute.
+      if (now - lastInitTryMs_ >= (failStreak_ < 5 ? 3000u : 60000u)) restart("not running");
       vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }

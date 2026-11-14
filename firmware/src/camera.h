@@ -52,6 +52,7 @@ class Camera {
   volatile uint32_t restarts_ = 0;
   uint32_t lastGoodMs_ = 0;
   uint32_t lastInitTryMs_ = 0;
+  uint32_t failStreak_ = 0;   // probes in a row that found no camera: past a few, retry only once a minute
   volatile bool streaming_ = false;
   volatile uint32_t intervalMs_ = 100;
   uint8_t* latest_ = nullptr;      // PSRAM
