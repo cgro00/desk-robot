@@ -41,9 +41,9 @@ def make(replies=None, spotify=None, **cfg):
 
 class ComputerTests(unittest.TestCase):
     def setUp(self):
-        p = patch.object(computer, "MAC", True)
-        p.start()
-        self.addCleanup(p.stop)
+        for p in (patch.object(computer, "MAC", True), patch.object(computer, "LINUX", False)):   # a Mac, wherever it runs
+            p.start()
+            self.addCleanup(p.stop)
 
     def test_off_by_default_and_refuses_everything(self):
         self.assertFalse(settings.defaults()["computer"]["control"])
@@ -457,3 +457,48 @@ class BrainTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LinuxAppTests(unittest.TestCase):
+    """open_app on Linux: an app is found by its desktop entry's Name or id, never by anything the model makes up."""
+
+    def test_finds_apps_by_desktop_entry(self):
+        with tempfile.TemporaryDirectory() as d:
+            apps = Path(d) / "applications"
+            apps.mkdir()
+            (apps / "org.gnome.Calculator.desktop").write_text("[Desktop Entry]\nType=Application\nName=Calculator\n")
+            (apps / "firefox.desktop").write_text("[Desktop Entry]\nName=Firefox\n[Desktop Action new]\nName=Other\n")
+            (apps / "hidden.desktop").write_text("[Desktop Entry]\nName=Hidden App\nNoDisplay=true\n")
+            with patch.dict(os.environ, {"XDG_DATA_HOME": d, "XDG_DATA_DIRS": d}):
+                self.assertEqual(computer._linux_find_app("calculator"), "org.gnome.Calculator")
+                self.assertEqual(computer._linux_find_app("Firefox"), "firefox")
+                self.assertIsNone(computer._linux_find_app("Other"))
+                self.assertIsNone(computer._linux_find_app("Hidden App"))
+                self.assertIsNone(computer._linux_find_app("../../bin/sh"))
+
+
+class SteamGameTests(unittest.TestCase):
+    """open_game: only games found in the Steam libraries, started by their numeric app id through Steam."""
+
+    def test_installed_games_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            apps = Path(d) / "steamapps"
+            apps.mkdir()
+            (apps / "libraryfolders.vdf").write_text(f'"libraryfolders"\n{{\n "0"\n {{\n  "path"  "{d}"\n }}\n}}\n')
+            (apps / "appmanifest_427520.acf").write_text('"AppState"\n{\n "appid" "427520"\n "name" "Factorio"\n}\n')
+            (apps / "appmanifest_262060.acf").write_text('"AppState"\n{\n "appid" "262060"\n "name" "Darkest Dungeon®"\n}\n')
+            (apps / "appmanifest_1493710.acf").write_text('"AppState"\n{\n "appid" "1493710"\n "name" "Proton Experimental"\n}\n')
+            with patch.object(computer, "_STEAM_ROOTS", (d,)):
+                self.assertEqual(computer.steam_games(), {"Darkest Dungeon": "262060", "Factorio": "427520"})
+                c, _ = make(apps="")
+                started = []
+                with patch.object(computer, "_steam_run", started.append):
+                    c.open_game({"name": "factorio"})
+                    for name in ("Proton Experimental", "Terminal", "427520", ""):
+                        with self.assertRaises(NotDone, msg=name):
+                            c.open_game({"name": name})
+                self.assertEqual(started, ["427520"])
+
+    def test_run_takes_digits_only(self):
+        with self.assertRaises(NotDone):
+            computer._steam_run("1; rm -rf ~")
