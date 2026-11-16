@@ -1,4 +1,4 @@
-# Rocky (desk-robot fork, desktop mode)
+# Rocky (desktop mode)
 
 ## Face window (`face-window/`)
 
