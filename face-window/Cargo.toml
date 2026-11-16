@@ -1,0 +1,13 @@
+[package]
+name = "rocky-face"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+minifb = "0.29"
+serde_json = "1"
+ureq = "3"
+x11rb = "0.14.0"
+
+[profile.release]
+opt-level = 3

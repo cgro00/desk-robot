@@ -447,7 +447,7 @@ def _synthesize_builtin(text: str) -> bytes:
         elif sys.platform == "win32":
             cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", _WINDOWS_TTS, path]
         elif shutil.which("espeak-ng") or shutil.which("espeak"):
-            cmd = [shutil.which("espeak-ng") or "espeak", "--stdin", "-w", path]
+            cmd = [shutil.which("espeak-ng") or "espeak", "-v", config.LANGUAGE, "--stdin", "-w", path]
         else:
             raise NoBuiltinVoice("no built-in voice on this system (install espeak-ng, or set FISH_AUDIO_API_KEY)")
         subprocess.run(cmd, input=text.encode(), check=True, timeout=60)

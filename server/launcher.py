@@ -41,6 +41,7 @@ BIND = "127.0.0.1"
 BRAIN_PORT = config.LIVE_VIEW_PORT
 PAGE = HERE / "brain" / "dashboard.html"
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+FACE_WINDOW = HERE.parent / "face-window" / "target" / "release" / "rocky-face"
 
 
 def brain_python() -> str:
@@ -172,6 +173,30 @@ class Brain:
 
 
 brain = Brain()
+
+
+class FaceWindow:
+    """The floating face (face-window/), started with the launcher when FACE_WINDOW=1 in server/.env."""
+
+    def __init__(self) -> None:
+        self.proc: subprocess.Popen | None = None
+
+    def stop(self) -> None:
+        if self.proc is not None and self.proc.poll() is None:
+            self.proc.terminate()
+            self.proc.wait(timeout=5)
+        self.proc = None
+
+    def start(self) -> str:
+        self.stop()
+        try:
+            self.proc = subprocess.Popen([str(FACE_WINDOW)])
+        except OSError as e:
+            return f"can't start {FACE_WINDOW} ({e}); build it with cargo build --release"
+        return "started"
+
+
+face_window = FaceWindow()
 
 
 def schema_meta() -> dict:
@@ -368,6 +393,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {"ok": True, "result": brain.start()})
             if path == "/launcher/stop":
                 return self._json(200, {"ok": True, "result": brain.stop()})
+            if path == "/launcher/face/restart":
+                return self._json(200, {"ok": True, "result": face_window.start()})
             if path == "/launcher/restart":
                 brain.stop()
                 time.sleep(0.5)
@@ -481,11 +508,14 @@ def main() -> None:
     print(f"{config.ROBOT_NAME} dashboard: http://localhost:{PORT}/  (this computer only)")
     if os.environ.get("ROCKY_START_BRAIN") == "1":
         brain.start()
+    if env_value("FACE_WINDOW") == "1":
+        print("face window:", face_window.start())
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        face_window.stop()
         if brain.running():
             brain.stop()
 

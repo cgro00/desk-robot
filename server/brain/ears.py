@@ -220,9 +220,14 @@ class Transcriber:
         )
 
     def transcribe(self, audio: np.ndarray) -> str:
+        if config.STT_API_KEY:
+            try:
+                return _transcribe_api(audio)
+            except Exception as e:
+                print(f"stt: cloud transcription failed ({e}); using local Whisper")
         segments, _ = self.model.transcribe(
             audio,
-            language="en",
+            language=config.LANGUAGE,
             beam_size=1,
             vad_filter=True,
             # Tells the model the name to expect; without this "Rocky" comes
@@ -232,7 +237,32 @@ class Transcriber:
         return " ".join(s.text.strip() for s in segments).strip()
 
 
-_WAKE_CLEAN = re.compile(r"[^a-z' ]+")
+_stt_client = None
+
+
+def _transcribe_api(audio: np.ndarray) -> str:
+    global _stt_client
+    import io
+    import wave
+
+    from openai import OpenAI
+
+    if _stt_client is None:
+        _stt_client = OpenAI(api_key=config.STT_API_KEY, base_url=config.STT_BASE_URL, timeout=10, max_retries=0)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SAMPLE_RATE)
+        w.writeframes((np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes())
+    result = _stt_client.audio.transcriptions.create(
+        model=config.STT_API_MODEL, file=("speech.wav", buf.getvalue()),
+        language=config.LANGUAGE, prompt=config.STT_PROMPT,
+    )
+    return result.text.strip()
+
+
+_WAKE_CLEAN = re.compile(r"[^\w' ]+")
 
 
 def normalize(text: str) -> str:

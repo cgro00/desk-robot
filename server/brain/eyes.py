@@ -73,8 +73,9 @@ class Eyes:
         self._cond = threading.Condition()
 
     # ── robot → server ──────────────────────────────────────────────────────
-    def push_frame(self, jpeg: bytes) -> None:
-        jpeg = rotate_jpeg(jpeg, config.CAMERA_ROTATE, config.CAMERA_MIRROR)
+    def push_frame(self, jpeg: bytes, upright: bool = False) -> None:
+        if not upright:
+            jpeg = rotate_jpeg(jpeg, config.CAMERA_ROTATE, config.CAMERA_MIRROR)
         now = time.time()
         with self._cond:
             self.jpeg = jpeg
