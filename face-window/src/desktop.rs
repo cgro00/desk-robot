@@ -1,12 +1,9 @@
-// Plain X11 (EWMH + RandR) instead of asking one window manager: works under i3, GNOME, KDE, Xfce, ...
+// Plain X11 (EWMH) instead of asking one window manager: works under i3, GNOME, KDE, Xfce, ...
 
 use x11rb::connection::Connection;
-use x11rb::protocol::randr::ConnectionExt as _;
 use x11rb::protocol::xproto::{AtomEnum, ClientMessageEvent, ConnectionExt as _, EventMask, PropMode, Window};
 use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
-
-pub type Rect = (isize, isize, isize, isize);
 
 pub struct Desktop {
     conn: RustConnection,
@@ -29,40 +26,6 @@ impl Desktop {
 
     fn atom(&self, name: &str) -> Option<u32> {
         Some(self.conn.intern_atom(false, name.as_bytes()).ok()?.reply().ok()?.atom)
-    }
-
-    /// The monitor under the mouse, minus panels and bars when the window manager publishes _NET_WORKAREA.
-    pub fn usable_area(&self) -> Option<Rect> {
-        let (px, py) = self.pointer()?;
-        let monitors = self.conn.randr_get_monitors(self.root, true).ok()?.reply().ok()?.monitors;
-        let m = monitors.iter().find(|m| {
-            let (x, y) = (m.x as isize, m.y as isize);
-            px >= x && px < x + m.width as isize && py >= y && py < y + m.height as isize
-        })?;
-        let (mut x0, mut y0) = (m.x as isize, m.y as isize);
-        let (mut x1, mut y1) = (x0 + m.width as isize, y0 + m.height as isize);
-        let workarea = self.atom("_NET_WORKAREA")
-            .and_then(|a| self.conn.get_property(false, self.root, a, AtomEnum::CARDINAL, 0, 4).ok()?.reply().ok())
-            .and_then(|r| r.value32().map(|v| v.map(|n| n as isize).collect::<Vec<_>>()));
-        if let Some(&[wx, wy, ww, wh]) = workarea.as_deref() {
-            (x0, y0, x1, y1) = (x0.max(wx), y0.max(wy), x1.min(wx + ww), y1.min(wy + wh));
-        }
-        Some((x0, y0, x1 - x0, y1 - y0))
-    }
-
-    /// The window the window manager says is active (EWMH), to hand focus back to after opening.
-    pub fn active_window(&self) -> Option<Window> {
-        let atom = self.atom("_NET_ACTIVE_WINDOW")?;
-        let reply = self.conn.get_property(false, self.root, atom, AtomEnum::WINDOW, 0, 1).ok()?.reply().ok()?;
-        let active = reply.value32()?.next().filter(|&w| w != 0);
-        active
-    }
-
-    pub fn activate(&self, window: Window) -> Option<()> {
-        let atom = self.atom("_NET_ACTIVE_WINDOW")?;
-        let msg = ClientMessageEvent::new(32, window, atom, [2, 0, 0, 0, 0]);   // 2: on the user's behalf
-        self.conn.send_event(false, self.root, EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY, msg).ok()?;
-        self.conn.flush().ok()
     }
 
     /// Ask the window manager to float the window, keep it above others and on every workspace, leave it out of

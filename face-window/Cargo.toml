@@ -12,10 +12,7 @@ raw-window-handle = "0.6"
 rocky-face-core = { path = "core" }
 serde_json = "1"
 ureq = "3"
-x11rb = { version = "0.14.0", features = ["randr"] }
-
-[profile.release]
-opt-level = 3
+x11rb = "0.14.0"
 
 # the dashboard's face.wasm: cargo build -p rocky-face-core --target wasm32-unknown-unknown --profile wasm
 [profile.wasm]

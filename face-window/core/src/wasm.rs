@@ -27,6 +27,12 @@ fn store<T>(list: &mut Vec<Option<T>>, item: T) -> u32 {
     }
 }
 
+fn free<T>(list: &mut [Option<T>], id: u32) {
+    if let Some(slot) = list.get_mut(id as usize) {
+        *slot = None;
+    }
+}
+
 fn emotion(i: u32) -> Option<&'static str> {
     EMOTIONS.get(i as usize).copied()
 }
@@ -62,11 +68,7 @@ pub extern "C" fn pack_new(ptr: *mut u8, len: usize) -> u32 {
 
 #[no_mangle]
 pub extern "C" fn pack_free(id: u32) {
-    PACKS.with_borrow_mut(|p| {
-        if let Some(slot) = p.get_mut(id as usize) {
-            *slot = None;
-        }
-    });
+    PACKS.with_borrow_mut(|p| free(p, id));
 }
 
 /// What later packs take for anything they leave out (NONE = the built-in defaults).
@@ -100,11 +102,7 @@ pub extern "C" fn sim_new(pack_id: u32, emo: u32, now: f64) -> u32 {
 
 #[no_mangle]
 pub extern "C" fn sim_free(id: u32) {
-    SIMS.with_borrow_mut(|s| {
-        if let Some(slot) = s.get_mut(id as usize) {
-            *slot = None;
-        }
-    });
+    SIMS.with_borrow_mut(|s| free(s, id));
 }
 
 #[no_mangle]

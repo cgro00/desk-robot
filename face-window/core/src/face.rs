@@ -138,31 +138,33 @@ struct Geo {
     left: f32, right: f32, top: f32, bot: f32, rt: f32, rb: f32,
 }
 
+fn slant(s: f32, u: f32) -> f32 {
+    if s >= 0. { s * (u + 1.) * 0.5 } else { -s * (1. - u) * 0.5 }
+}
+
+/// Outside the rounded corner of radius `r` whose circle centre is at height `cy`.
+fn off_corner(g: &Geo, x: f32, y: f32, cy: f32, r: f32) -> bool {
+    let qx = clamp(x, g.left + r, g.right - r);
+    let (dx, dy) = (x - qx, y - cy);
+    dx * dx + dy * dy > r * r
+}
+
 fn in_eye(g: &Geo, x: f32, y: f32) -> bool {
     if x < g.left || x >= g.right || y < g.top || y >= g.bot {
         return false;
     }
     let u = (x - g.cx) / (g.w * 0.5) * g.inner;
-    let top_cut = if g.st >= 0. { g.st * (u + 1.) * 0.5 } else { -g.st * (1. - u) * 0.5 };
-    let bot_cut = if g.sb >= 0. { g.sb * (u + 1.) * 0.5 } else { -g.sb * (1. - u) * 0.5 };
+    let (top_cut, bot_cut) = (slant(g.st, u), slant(g.sb, u));
     let hh = g.bot - g.top;
     let yy = y - top_cut * (g.bot - y) / hh + bot_cut * (y - g.top) / hh;
     if yy < g.top + g.lid || yy >= g.bot {
         return false;
     }
-    if yy < g.top + g.rt {
-        let qx = clamp(x, g.left + g.rt, g.right - g.rt);
-        let (dx, dy) = (x - qx, yy - (g.top + g.rt));
-        if dx * dx + dy * dy > g.rt * g.rt {
-            return false;
-        }
+    if yy < g.top + g.rt && off_corner(g, x, yy, g.top + g.rt, g.rt) {
+        return false;
     }
-    if yy > g.bot - g.rb {
-        let qx = clamp(x, g.left + g.rb, g.right - g.rb);
-        let (dx, dy) = (x - qx, yy - (g.bot - g.rb));
-        if dx * dx + dy * dy > g.rb * g.rb {
-            return false;
-        }
+    if yy > g.bot - g.rb && off_corner(g, x, yy, g.bot - g.rb, g.rb) {
+        return false;
     }
     if g.cheek > 0.5 {
         let rr = g.w;
@@ -176,6 +178,13 @@ fn in_eye(g: &Geo, x: f32, y: f32) -> bool {
 
 #[derive(Clone, Copy, Default)]
 struct Particle { alive: bool, x: f32, y: f32, age: f32 }
+
+impl Particle {
+    /// Flickers out over its last fifth.
+    fn shown(&self, frame: u64) -> bool {
+        self.alive && !(self.age > 0.8 && frame % 2 == 0)
+    }
+}
 
 pub struct Sim {
     pack: Pack,
@@ -280,9 +289,7 @@ impl Sim {
             self.next_heart = now + 200.;
         }
         self.emotion = e.to_string();
-        let (gx, gy) = (self.look().gaze_x, self.look().gaze_y);
-        self.gtx = gx;
-        self.gty = gy;
+        (self.gtx, self.gty) = (self.look().gaze_x, self.look().gaze_y);
     }
 
     pub fn set_asleep(&mut self, on: bool, now: f64) {
@@ -623,10 +630,8 @@ impl Sim {
             self.line(ro + 4, eye_top - 4, ro + 2, eye_top - 9);
         }
         if fx.contains("hearts") {
-            for h in self.hearts {
-                if !h.alive || (h.age > 0.8 && self.frame % 2 == 0) {
-                    continue;
-                }
+            let frame = self.frame;
+            for h in self.hearts.into_iter().filter(|h| h.shown(frame)) {
                 self.glyph(&HEART, h.x.floor() as i32, h.y.floor() as i32);
             }
         }
@@ -634,13 +639,12 @@ impl Sim {
             self.glyph(&QUESTION, 112, 3 + ((self.frame as f32 * 0.15).sin() * 2.).floor() as i32);
         }
         if fx.contains("sparkle") {
-            let a = (self.frame / 5) % 2 == 0;
-            let pts = [
-                if a { lo - 6 } else { lo - 5 }, if a { eye_top + 3 } else { eye_bottom - 5 },
-                if a { ro + 6 } else { ro + 5 }, if a { eye_bottom - 4 } else { eye_top + 2 },
-            ];
-            for k in 0..2 {
-                let (x, y) = (pts[k * 2], pts[k * 2 + 1]);
+            let pts = if (self.frame / 5) % 2 == 0 {
+                [(lo - 6, eye_top + 3), (ro + 6, eye_bottom - 4)]
+            } else {
+                [(lo - 5, eye_bottom - 5), (ro + 5, eye_top + 2)]
+            };
+            for (x, y) in pts {
                 self.line(x - 2, y, x + 2, y);
                 self.line(x, y - 2, x, y + 2);
             }
@@ -648,10 +652,8 @@ impl Sim {
     }
 
     fn draw_zeds(&mut self) {
-        for z in self.zeds {
-            if !z.alive || (z.age > 0.8 && self.frame % 2 == 0) {
-                continue;
-            }
+        let frame = self.frame;
+        for z in self.zeds.into_iter().filter(|z| z.shown(frame)) {
             let s = if z.age < 0.33 { 4 } else if z.age < 0.66 { 6 } else { 8 };
             let (x, y) = (z.x.floor() as i32, z.y.floor() as i32 - s);
             if x < 0 || x >= W as i32 - 4 || y < 0 {

@@ -1,6 +1,5 @@
 mod desktop;
 
-
 use rocky_face_core::face::{self, Sim, H, W};
 use minifb::{MouseButton, Scale, Window, WindowOptions};
 use serde_json::Value;
@@ -20,7 +19,6 @@ struct Shared {
 
 struct Status {
     emotion: String,
-    awake: bool,
     speaking: bool,
 }
 
@@ -42,7 +40,6 @@ fn poll(shared: Arc<Mutex<Shared>>, brain: String, launcher: String) {
     loop {
         let status = get_json(&agent, &format!("{brain}/status")).map(|s| Status {
             emotion: s.get("emotion").and_then(Value::as_str).unwrap_or("neutral").to_string(),
-            awake: s.get("awake").and_then(Value::as_bool).unwrap_or(false),
             speaking: s.get("speaking").and_then(Value::as_bool).unwrap_or(false),
         });
         let pack = if last_pack_check.elapsed() > Duration::from_secs(5) {
@@ -61,8 +58,8 @@ fn poll(shared: Arc<Mutex<Shared>>, brain: String, launcher: String) {
     }
 }
 
-fn post(url: &str, body: &str) {
-    let sent = ureq::post(url).header("X-Rocky-Console", "1").header("Content-Type", "application/json").send(body);
+fn post(url: &str) {
+    let sent = ureq::post(url).header("X-Rocky-Console", "1").header("Content-Type", "application/json").send("{}");
     if let Err(e) = sent {
         eprintln!("rocky-face: {url} failed ({e}); is launcher.py running?");
     }
@@ -85,13 +82,12 @@ fn arg(name: &str) -> Option<String> {
 fn main() {
     let brain = arg("--brain").unwrap_or_else(|| "http://127.0.0.1:8767".into());
     let launcher = arg("--launcher").unwrap_or_else(|| "http://127.0.0.1:8766".into());
-    let (scale, factor) = match arg("--scale").as_deref() {
-        Some("1") => (Scale::X1, 1),
-        Some("4") => (Scale::X4, 4),
-        Some("8") => (Scale::X8, 8),
-        _ => (Scale::X2, 2),
+    let scale = match arg("--scale").as_deref() {
+        Some("1") => Scale::X1,
+        Some("4") => Scale::X4,
+        Some("8") => Scale::X8,
+        _ => Scale::X2,
     };
-    let margin: isize = arg("--margin").and_then(|m| m.parse().ok()).unwrap_or(24);
 
     let rocky: Value = serde_json::from_str(BUILTIN_PACK).expect("built-in pack");
     let fallback = face::resolve(&rocky, None);
@@ -107,7 +103,6 @@ fn main() {
     }
 
     let desktop = desktop::Desktop::connect();
-    let was_active = desktop.as_ref().and_then(desktop::Desktop::active_window);
     let mut window = Window::new("Rocky", W, H, WindowOptions {
         borderless: true,
         topmost: true,
@@ -116,23 +111,13 @@ fn main() {
     })
     .expect("open window");
     window.set_target_fps(30);
-    let me = x11_window(&window);
-    if let Some(d) = &desktop {
-        if let Some(id) = me {
-            d.pin(id);
-        }
-        if let Some(w) = was_active {
-            d.activate(w);   // window managers that focus a new window anyway: give it straight back
-        }
-        if let Some((x, y, w, _)) = d.usable_area() {
-            window.set_position(x + w - (W * factor) as isize - margin, y + 4 * margin);
-        }
+    if let (Some(d), Some(id)) = (&desktop, x11_window(&window)) {
+        d.pin(id);
     }
 
     let mut pixels = vec![OFF; W * H];
     let mut shown_pack: Option<Value> = None;
     let mut grab: Option<((isize, isize), (isize, isize))> = None;   // window and pointer where the press began
-    let mut last_other = was_active;
 
     while window.is_open() {
         let t = now();
@@ -163,20 +148,7 @@ fn main() {
             *p = if on != 0 { ON } else { OFF };
         }
 
-        // drag the borderless window with the left button; a click that didn't move it starts a stopped brain, else wakes him or puts him to sleep
-        // focus that lands here anyway (click to focus, focus follows mouse) goes straight back where it was
-        if let (Some(d), Some(me)) = (&desktop, me) {
-            match d.active_window() {
-                Some(w) if w == me => {
-                    if let Some(o) = last_other {
-                        d.activate(o);
-                    }
-                }
-                Some(w) => last_other = Some(w),
-                None => {}
-            }
-        }
-
+        // drag the borderless window with the left button; a click that didn't move it starts or stops the brain
         let at = desktop.as_ref().and_then(desktop::Desktop::pointer);
         match (window.get_mouse_down(MouseButton::Left), at) {
             (true, Some(p)) => match grab {
@@ -189,13 +161,9 @@ fn main() {
                     _ => isize::MAX,
                 };
                 if moved < 4 {
-                    let awake = shared.lock().unwrap().status.as_ref().map(|s| s.awake);
-                    let (url, body) = match awake {
-                        None => (format!("{launcher}/launcher/start"), "{}"),
-                        Some(true) => (format!("{brain}/api/sleep"), r#"{"on": true}"#),
-                        Some(false) => (format!("{brain}/api/sleep"), r#"{"on": false}"#),
-                    };
-                    thread::spawn(move || post(&url, body));
+                    let running = shared.lock().unwrap().status.is_some();
+                    let url = format!("{launcher}/launcher/{}", if running { "stop" } else { "start" });
+                    thread::spawn(move || post(&url));
                 }
                 grab = None;
             }
