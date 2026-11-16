@@ -1,7 +1,7 @@
-// Port of FaceKit in server/brain/dashboard.html (itself a port of firmware/src/face.cpp): same pack format, same
-// animation, same 128x64 one-bit picture.
+// Rocky's face for the face window and (as server/brain/face.wasm, see wasm.rs) the dashboard. A port of
+// firmware/src/face.cpp: same pack format, same animation, same 128x64 one-bit picture.
 
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 
 pub const W: usize = 128;
@@ -54,6 +54,21 @@ pub struct Pack {
     mouth: u8,
     asleep: Eye,
     looks: HashMap<String, Look>,
+}
+
+impl Pack {
+    /// The resolved pack for the dashboard's face editor: every emotion's eyes with defaults filled in.
+    pub fn to_json(&self) -> Value {
+        let eye = |e: &Eye| Value::Object(EYE_KEYS.iter().zip(e).map(|(k, v)| (k.to_string(), json!(v))).collect());
+        let looks: Map<String, Value> = self.looks.iter().map(|(name, l)| (name.clone(), json!({
+            "l": eye(&l.l), "r": eye(&l.r), "gazeX": l.gaze_x, "gazeY": l.gaze_y, "pop": l.pop, "smile": l.smile,
+            "fx": l.fx.iter().collect::<Vec<_>>(),
+        }))).collect();
+        json!({
+            "gap": self.gap, "y": self.y, "cyclops": self.cyclops, "outline": self.outline, "glint": self.glint,
+            "mouth": self.mouth, "asleep": eye(&self.asleep), "looks": looks,
+        })
+    }
 }
 
 fn clamp(x: f32, lo: f32, hi: f32) -> f32 {
@@ -167,6 +182,7 @@ pub struct Sim {
     pub buf: [u8; W * H],
     emotion: String,
     asleep: bool,
+    still: bool,
     pub talking: bool,
     pub mouth_level: f32,
     mouth: f32,
@@ -187,7 +203,7 @@ impl Sim {
     pub fn new(pack: Pack, emotion: &str, now: f64) -> Sim {
         let look = pack.looks[emotion].clone();
         let mut s = Sim {
-            pack, buf: [0; W * H], emotion: String::new(), asleep: false, talking: false, mouth_level: 0., mouth: 0.,
+            pack, buf: [0; W * H], emotion: String::new(), asleep: false, still: false, talking: false, mouth_level: 0., mouth: 0.,
             blink: 0., blink_closing: false, gaze_x: 0., gaze_y: 0., gtx: 0., gty: 0.,
             pupil_x: 0., pupil_y: 0., ptx: 0., pty: 0., pop: 0., squint: 0., tear_y: -1., think_dots: 0, jitter: 0.,
             hearts: Default::default(), heart_side: false, zeds: Default::default(), breath: 0., twitch: 0., frame: 0,
@@ -221,6 +237,31 @@ impl Sim {
         self.pack = pack;
         let e = std::mem::take(&mut self.emotion);
         self.set_emotion(&e, now);
+        if self.still {
+            self.set_still(&e, now);
+        }
+    }
+
+    /// Face::setStill: the emotion settled, no blinks, glances or flourishes.
+    pub fn set_still(&mut self, e: &str, now: f64) {
+        self.still = true;
+        self.asleep = false;
+        self.set_emotion(e, now);
+        let look = self.look().clone();
+        self.cur_l = look.l;
+        self.cur_r = look.r;
+        self.smile = look.smile;
+        self.blink = 0.;
+        self.blink_closing = false;
+        self.pop = 0.;
+        self.squint = 0.;
+        self.twitch = 0.;
+        self.gaze_x = self.gtx;
+        self.gaze_y = self.gty;
+        self.mouth = 0.;
+        self.talking = false;
+        self.jitter = 0.;
+        (self.pupil_x, self.pupil_y, self.ptx, self.pty) = (0., 0., 0., 0.);
     }
 
     pub fn set_emotion(&mut self, e: &str, now: f64) {
@@ -267,6 +308,9 @@ impl Sim {
 
     pub fn step(&mut self, now: f64) {
         self.frame += 1;
+        if self.still {
+            return;
+        }
         let look = self.look().clone();
         let f = if self.asleep { 0.12 } else { 0.25 };
         let (tl, tr) = if self.asleep { (self.pack.asleep, self.pack.asleep) } else { (look.l, look.r) };
@@ -624,7 +668,7 @@ impl Sim {
     pub fn render(&mut self, now: f64) {
         self.buf.fill(0);
         let look = self.look().clone();
-        let lively = !self.asleep;
+        let lively = !self.still && !self.asleep;
         let mut bob = if self.asleep { self.breath.sin() * 2. } else { -self.mouth * 2. };
         if lively && look.fx.contains("bounce") {
             bob -= (self.frame as f32 * 0.18).sin().abs() * 3.;
@@ -657,7 +701,9 @@ impl Sim {
         if self.asleep {
             self.draw_zeds();
         } else {
-            self.draw_flourishes(left_outer, right_outer, eye_top, eye_bottom, now);
+            if !self.still {
+                self.draw_flourishes(left_outer, right_outer, eye_top, eye_bottom, now);
+            }
             self.draw_mouth(W as i32 / 2 + (self.gaze_x * 0.5).floor() as i32, cy.floor());
         }
     }

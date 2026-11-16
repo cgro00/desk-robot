@@ -473,9 +473,18 @@ name = "rocky-face"
 version = "0.1.0"
 dependencies = [
  "minifb",
+ "raw-window-handle",
+ "rocky-face-core",
  "serde_json",
  "ureq",
  "x11rb",
+]
+
+[[package]]
+name = "rocky-face-core"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

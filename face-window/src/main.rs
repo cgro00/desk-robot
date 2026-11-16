@@ -1,7 +1,8 @@
-mod face;
+mod desktop;
 
-use face::{Sim, H, W};
-use minifb::{Key, MouseButton, Scale, Window, WindowOptions};
+
+use rocky_face_core::face::{self, Sim, H, W};
+use minifb::{MouseButton, Scale, Window, WindowOptions};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -60,28 +61,6 @@ fn poll(shared: Arc<Mutex<Shared>>, brain: String, launcher: String) {
     }
 }
 
-/// The mouse on the whole screen, asked from X each time: the window's own (relative) mouse position lags a frame
-/// behind its moves, which made dragging shake.
-struct Pointer {
-    conn: x11rb::rust_connection::RustConnection,
-    root: u32,
-}
-
-impl Pointer {
-    fn connect() -> Option<Pointer> {
-        use x11rb::connection::Connection;
-        let (conn, screen) = x11rb::connect(None).ok()?;
-        let root = conn.setup().roots[screen].root;
-        Some(Pointer { conn, root })
-    }
-
-    fn position(&self) -> Option<(isize, isize)> {
-        use x11rb::protocol::xproto::ConnectionExt;
-        let r = self.conn.query_pointer(self.root).ok()?.reply().ok()?;
-        Some((r.root_x as isize, r.root_y as isize))
-    }
-}
-
 fn post(url: &str, body: &str) {
     let sent = ureq::post(url).header("X-Rocky-Console", "1").header("Content-Type", "application/json").send(body);
     if let Err(e) = sent {
@@ -89,13 +68,13 @@ fn post(url: &str, body: &str) {
     }
 }
 
-/// The focused i3 workspace's rectangle (the screen minus the bar): x, y, width, height.
-fn focused_workspace_area() -> Option<(isize, isize, isize, isize)> {
-    let out = std::process::Command::new("i3-msg").args(["-t", "get_workspaces"]).output().ok()?;
-    let spaces: Value = serde_json::from_slice(&out.stdout).ok()?;
-    let rect = spaces.as_array()?.iter().find(|w| w["focused"] == true)?.get("rect")?;
-    let n = |k: &str| rect.get(k).and_then(Value::as_i64).map(|v| v as isize);
-    Some((n("x")?, n("y")?, n("width")?, n("height")?))
+fn x11_window(window: &Window) -> Option<u32> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match window.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Xlib(h) => Some(h.window as u32),
+        RawWindowHandle::Xcb(h) => Some(h.window.get()),
+        _ => None,
+    }
 }
 
 fn arg(name: &str) -> Option<String> {
@@ -127,6 +106,8 @@ fn main() {
         thread::spawn(move || poll(shared, brain, launcher));
     }
 
+    let desktop = desktop::Desktop::connect();
+    let was_active = desktop.as_ref().and_then(desktop::Desktop::active_window);
     let mut window = Window::new("Rocky", W, H, WindowOptions {
         borderless: true,
         topmost: true,
@@ -135,16 +116,25 @@ fn main() {
     })
     .expect("open window");
     window.set_target_fps(30);
-    if let Some((x, y, w, _)) = focused_workspace_area() {
-        window.set_position(x + w - (W * factor) as isize - margin, y + 4 * margin);
+    let me = x11_window(&window);
+    if let Some(d) = &desktop {
+        if let Some(id) = me {
+            d.pin(id);
+        }
+        if let Some(w) = was_active {
+            d.activate(w);   // window managers that focus a new window anyway: give it straight back
+        }
+        if let Some((x, y, w, _)) = d.usable_area() {
+            window.set_position(x + w - (W * factor) as isize - margin, y + 4 * margin);
+        }
     }
 
     let mut pixels = vec![OFF; W * H];
     let mut shown_pack: Option<Value> = None;
-    let pointer = Pointer::connect();
     let mut grab: Option<((isize, isize), (isize, isize))> = None;   // window and pointer where the press began
+    let mut last_other = was_active;
 
-    while window.is_open() && !window.is_key_down(Key::Escape) && !window.get_mouse_down(MouseButton::Right) {
+    while window.is_open() {
         let t = now();
         {
             let s = shared.lock().unwrap();
@@ -174,7 +164,20 @@ fn main() {
         }
 
         // drag the borderless window with the left button; a click that didn't move it starts a stopped brain, else wakes him or puts him to sleep
-        let at = pointer.as_ref().and_then(Pointer::position);
+        // focus that lands here anyway (click to focus, focus follows mouse) goes straight back where it was
+        if let (Some(d), Some(me)) = (&desktop, me) {
+            match d.active_window() {
+                Some(w) if w == me => {
+                    if let Some(o) = last_other {
+                        d.activate(o);
+                    }
+                }
+                Some(w) => last_other = Some(w),
+                None => {}
+            }
+        }
+
+        let at = desktop.as_ref().and_then(desktop::Desktop::pointer);
         match (window.get_mouse_down(MouseButton::Left), at) {
             (true, Some(p)) => match grab {
                 None => grab = Some((window.get_position(), p)),

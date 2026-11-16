@@ -40,6 +40,7 @@ PORT = int(os.environ.get("ROCKY_DASHBOARD_PORT", "8766"))
 BIND = "127.0.0.1"
 BRAIN_PORT = config.LIVE_VIEW_PORT
 PAGE = HERE / "brain" / "dashboard.html"
+FACE_WASM = HERE / "brain" / "face.wasm"
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
 FACE_WINDOW = HERE.parent / "face-window" / "target" / "release" / "rocky-face"
 
@@ -335,6 +336,8 @@ class Handler(BaseHTTPRequestHandler):
             except OSError as e:
                 return self._reply(500, "text/plain", f"dashboard page missing: {e}".encode())
             return self._reply(200, "text/html; charset=utf-8", page)
+        if url.path == "/face.wasm":
+            return self._reply(200, "application/wasm", FACE_WASM.read_bytes())
         if url.path == "/launcher/state":
             # with the active personality's name, so an open page follows a switch or a rename without a reload
             return self._json(200, {**brain.state(), "name": active_name()})

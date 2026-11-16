@@ -10,6 +10,12 @@ cd face-window && cargo build --release && curl -X POST -H "X-Rocky-Console: 1" 
 
 Changes to `server/launcher.py` itself still need a launcher restart.
 
+The face drawing lives once, in `face-window/core/src/face.rs`. The dashboard uses it as `server/brain/face.wasm` (committed, so the server needs no Rust); after changing `face-window/core/`, rebuild and copy it:
+
+```bash
+cd face-window && cargo build -p rocky-face-core --target wasm32-unknown-unknown --profile wasm && cp target/wasm32-unknown-unknown/wasm/rocky_face_core.wasm ../server/brain/face.wasm
+```
+
 ## Tests
 
 ```bash
