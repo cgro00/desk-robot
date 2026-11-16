@@ -1,0 +1,24 @@
+[workspace]
+members = ["core"]
+
+[package]
+name = "rocky-face"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+minifb = "0.29"
+raw-window-handle = "0.6"
+rocky-face-core = { path = "core" }
+serde_json = "1"
+ureq = "3"
+x11rb = "0.14.0"
+
+# the dashboard's face.wasm: cargo build -p rocky-face-core --target wasm32-unknown-unknown --profile wasm
+[profile.wasm]
+inherits = "release"
+opt-level = "s"
+lto = true
+strip = true
+panic = "abort"
+codegen-units = 1

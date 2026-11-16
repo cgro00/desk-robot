@@ -205,6 +205,8 @@ class RobotBrain:
             content.append(_image_part(jpeg))
         elif camera_wanted:
             content.append({"type": "text", "text": "(Your camera has no fresh picture right now, so you cannot see anything at the moment.)"})
+        if config.HUNGARIAN:
+            content.append({"type": "text", "text": "(Válaszolj magyarul.)"})
         user_msg = {"role": "user", "content": content}
         self.history.append(user_msg)
         mark = len(self.history) - 1
@@ -384,7 +386,7 @@ class RobotBrain:
             if not "".join(raw).strip() and not nudged:
                 # Some models go quiet right after using an ability. Ask once.
                 nudged = True
-                self.history.append({"role": "user", "content": "(Tell your human what you just did, in one short line.)"})
+                self.history.append({"role": "user", "content": "(Tell your human what you just did, in one short line." + (" Magyarul.)" if config.HUNGARIAN else ")")})
                 continue
             if nudged and self.history and self.history[-1].get("role") == "user":
                 self.history.pop()  # don't keep the nudge in the transcript

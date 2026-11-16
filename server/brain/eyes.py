@@ -73,8 +73,9 @@ class Eyes:
         self._cond = threading.Condition()
 
     # ── robot → server ──────────────────────────────────────────────────────
-    def push_frame(self, jpeg: bytes) -> None:
-        jpeg = rotate_jpeg(jpeg, config.CAMERA_ROTATE, config.CAMERA_MIRROR)
+    def push_frame(self, jpeg: bytes, upright: bool = False) -> None:
+        if not upright:
+            jpeg = rotate_jpeg(jpeg, config.CAMERA_ROTATE, config.CAMERA_MIRROR)
         now = time.time()
         with self._cond:
             self.jpeg = jpeg
@@ -121,6 +122,7 @@ class Eyes:
         eyes = self
         page = (Path(__file__).with_name("dashboard.html").read_text(encoding="utf-8")
                 .replace("{name}", config.ROBOT_NAME).encode())
+        face_wasm = Path(__file__).with_name("face.wasm").read_bytes()
         local_hosts = ("localhost", "127.0.0.1", "::1", bind.lower())
 
         class Handler(BaseHTTPRequestHandler):
@@ -199,6 +201,8 @@ class Eyes:
                     return
                 if self.path == "/":
                     self._reply(200, "text/html; charset=utf-8", page)
+                elif self.path == "/face.wasm":
+                    self._reply(200, "application/wasm", face_wasm)
                 elif self.path == "/frame":
                     if eyes.jpeg:
                         self._reply(200, "image/jpeg", eyes.jpeg)
