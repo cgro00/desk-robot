@@ -356,6 +356,7 @@ away from the computer.
 | "Rocky, dance!" | One of his four routines at random (groove, robot, sprinkler, disco), about 10 seconds of neck moves on a beat. The dashboard's Head card has a Dance button too. |
 | "what do you see?" | He describes the current camera frame, and only what is actually in it. |
 | "track me" / "stop tracking" | His head follows your face, or stops. |
+| "Rocky, set a pasta timer for 8 minutes" / "how long is left?" / "cancel the tea timer" | Up to 10 timers, each up to 24 hours. The soonest counts down on his screen (top right on the face, in place of the date on the clock; firmware with the `timer` message). When one runs out he wakes up, calls out to you and 0:00 blinks. Timers live in the brain's memory: restarting it forgets them. |
 | "Rocky, sleep" / "goodnight" | He says goodnight and stops listening until you say his name. His screen shows the sleep face for a few seconds, then the clock. |
 | "Rocky, help me focus for 25 minutes" | A [focus session](#focus-mode): he answers nothing until it ends, and only speaks up when you pick up your phone. "Hey Rocky, stop focus" ends it early. |
 

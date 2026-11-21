@@ -1,4 +1,5 @@
 #include "face.h"
+#include "timer_badge.h"
 
 #include <ArduinoJson.h>
 #include <Preferences.h>
@@ -700,6 +701,7 @@ void Face::render() {
     drawMouth(SCREEN_W / 2 + static_cast<int>(floorf(gazeX_ * 0.5f)), static_cast<int>(floorf(cy)), eyeBottom);
   }
   u8g2_.setDrawColor(1);
+  timer_badge::drawCorner(u8g2_);
   u8g2_.sendBuffer();
 }
 

@@ -1,4 +1,5 @@
 #include "home_screen.h"
+#include "timer_badge.h"
 
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
@@ -245,6 +246,16 @@ void HomeScreen::draw() {
   } else {
     if (s.dmy) snprintf(buf, sizeof(buf), "%d %s %d", t.tm_mday, MONTHS[t.tm_mon], t.tm_year + 1900);
     else snprintf(buf, sizeof(buf), "%s %d, %d", MONTHS[t.tm_mon], t.tm_mday, t.tm_year + 1900);
+  }
+  // a running timer takes the date's place: "PASTA 7:55" (blinking at 0:00)
+  char tbuf[12];
+  if (timer_badge::text(tbuf, sizeof(tbuf))) {
+    char lb[17];
+    strlcpy(lb, timer_badge::label(), sizeof(lb));
+    for (char* c = lb; *c; ++c) *c = toupper(*c);
+    bool ringing = !strcmp(tbuf, "0:00");
+    if (ringing && (millis() / 400) % 2) buf[0] = 0;
+    else snprintf(buf, sizeof(buf), "%s%s%s", lb[0] ? lb : "TIMER", " ", tbuf);
   }
   u8g2_.setFont(u8g2_font_helvB08_tr);
   u8g2_.drawStr(64 - u8g2_.getStrWidth(buf) / 2 + dx, 10 + dy, buf);

@@ -61,6 +61,11 @@ def _without_thinking(text: str) -> str:
 # say about it (a head turn with no picture), so the reply ends there once he has said his line, like a quick action.
 Action = Callable[[dict], tuple]
 
+from . import timers as _timers
+
+# Abilities that aren't about the body; offered when main.py hands over a matching action.
+EXTRA_TOOLS = [_timers.TOOL]
+
 TOOLS = [
     {
         "type": "function",
@@ -272,7 +277,8 @@ class RobotBrain:
                 model=config.MODEL,
                 max_tokens=200,  # backstop; the sentence limit does the real work
                 messages=[{"role": "system", "content": personality.SYSTEM_PROMPT}, *self.history],
-                tools=[*TOOLS, *self.extra_tools()] if self.actions else openai.NOT_GIVEN,
+                tools=[*TOOLS, *[t for t in EXTRA_TOOLS if t["function"]["name"] in self.actions],
+                       *self.extra_tools()] if self.actions else openai.NOT_GIVEN,
                 stream=True,
                 extra_body=self._extra,
             )

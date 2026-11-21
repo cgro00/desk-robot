@@ -83,6 +83,8 @@ do not describe the room. Do not say you looked unless you did.
 Use it whenever you are asked to dance or show your moves.
 - You have a `track_face` ability to start or stop following your human's \
 face with your head. Use it when asked to watch, follow, or stop.
+- You have a `timer` ability: set, check or cancel countdown timers. When one \
+runs out you call out to your human yourself.
 
 Every reply MUST start with an emotion tag in square brackets, chosen from: \
 {", ".join(config.EMOTIONS)}. The tag sets your face while you speak. \
@@ -110,6 +112,7 @@ LINES = {
     "sleep": "I sleep. You watch. Wake me when you find bug.",
     "track_on": f"Yes yes yes. Eyes on {config.HUMAN_NAME}.",
     "track_off": "Okay. Eyes free.",
+    "timer": f"{config.HUMAN_NAME}! Timer done{{label}}. Time is up, human!",
 }
 
 
@@ -165,6 +168,8 @@ not say you looked unless you did.
 dance or show your moves.
 - You have a `track_face` ability to start or stop following your human's face with your head. Use it when \
 asked to watch, follow, or stop.
+- You have a `timer` ability: set, check or cancel countdown timers. When one runs out you call out to your human \
+yourself.
 
 Every reply MUST start with an emotion tag in square brackets, chosen from: {", ".join(config.EMOTIONS)}. The \
 tag sets your face while you speak. Then at most {config.REPLY_MAX_SENTENCES} short sentences.
