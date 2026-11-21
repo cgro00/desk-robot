@@ -45,7 +45,7 @@ import time
 
 import websockets
 
-from . import computer, config, decisions, faces, mouth, personality, settings
+from . import computer, config, decisions, faces, mouth, personality, settings, timers as timer_mod
 from . import focus as focus_mode
 from .body import Body
 from .dance import Dancer, length as dance_length
@@ -240,6 +240,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
     await send_to_robot({"type": "stream", "on": True, "fps": config.CAMERA_FPS, "size": config.CAMERA_STREAM_SIZE})
     # No idle head glances: they fight deliberate looks. The eyes still move.
     await send_to_robot({"type": "glance", "on": False})
+    await show_timer()   # a timer that was running while it was away
     # Its clock / weather / screen settings (it keeps a copy in flash), its volume, and whether he's awake: it
     # starts on the clock screen and stays there unless he is.
     await send_to_robot(settings.robot_payload(current_settings))
@@ -567,8 +568,51 @@ def focus_busy() -> bool:
     return thinking or speaking_now() or (dancer is not None and dancer.dancing)
 
 
+timers = timer_mod.Timers()
+
+
+async def show_timer(clear_if_none: bool = True) -> None:
+    """The soonest timer's countdown on the robot's screen (it counts down on its own), or nothing."""
+    t = timers.soonest()
+    if t is not None:
+        await send_to_robot({"type": "timer", **t})
+    elif clear_if_none:
+        await send_to_robot({"type": "timer", "left": 0})
+
+
+def timer_ability(args: dict) -> tuple:
+    """The `timer` ability. set/cancel: his line before the call was enough (no second reply); check: he says
+    what's left. The robot's screen follows every change."""
+    result = timers.ability(args)
+    if main_loop is not None and args.get("action") in ("set", "cancel"):
+        asyncio.run_coroutine_threadsafe(show_timer(), main_loop)
+    return (result, None, args.get("action") in ("set", "cancel") and not result.startswith("Not done"))
+
+
+async def timer_loop() -> None:
+    """Ring each timer when it runs out: he wakes up, looks surprised and says so (waiting for a reply he is in the
+    middle of, so he never talks over himself)."""
+    global awake_until
+    while True:
+        await asyncio.sleep(0.5)
+        for t in timers.due():
+            print(f"(timer done: {t['label'] or timer_mod.spoken(t['length'])})")
+            for _ in range(60):                     # up to 30 s for a reply in progress to finish
+                if not (thinking or speaking_now()):
+                    break
+                await asyncio.sleep(0.5)
+            awake_until = max(awake_until, time.time() + config.AWAKE_SECONDS)
+            await wake_up()
+            await send_to_robot({"type": "emotion", "name": "surprised"})
+            line = personality.LINES.get("timer") or "Timer done{label}!"
+            await say(line.replace("{label}", f": {t['label']}" if t["label"] else ""))
+            await show_timer(clear_if_none=False)   # the next one, if any; else "0:00" blinks out on its own
+            awake_until = max(awake_until, time.time() + config.AWAKE_SECONDS)
+
+
 main_loop: asyncio.AbstractEventLoop | None = None
 ABILITIES = {
+    "timer": timer_ability,
     "look": _sync(look),
     "track_face": _sync(lambda args: set_tracking(bool(args.get("on", True)))),
     "dance": _sync(lambda args: dance()),
@@ -1651,6 +1695,7 @@ async def main() -> None:
         doze_task = asyncio.create_task(doze_loop())
         head_task = asyncio.create_task(head_loop())
         mic_task = asyncio.create_task(mic_watch())
+        timer_task = asyncio.create_task(timer_loop())
         if config.LISTEN_ON_START:
             await start_listening()
         try:
@@ -1660,6 +1705,7 @@ async def main() -> None:
             doze_task.cancel()
             head_task.cancel()
             mic_task.cancel()
+            timer_task.cancel()
             if ears is not None:
                 stop_listening()
 

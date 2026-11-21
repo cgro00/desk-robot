@@ -206,6 +206,11 @@ void Link::handleMessage(const char* json) {
     // {"type":"motion","axis":"pan","speed":450,"accel":4000}: the neck's speed limits (dances run it fast)
     cmd = String("motion ") + (doc["axis"] | "pan") + " " + String(doc["speed"] | 0.0f, 0) + " " +
           String(doc["accel"] | 0.0f, 0);
+  } else if (!strcmp(type, "timer")) {
+    // {"type":"timer","left":475,"label":"pasta"}: the countdown on the screen (left 0 clears it)
+    String label = doc["label"] | "";
+    label.replace(" ", "_");   // one word on the console line; shown with spaces again
+    cmd = String("timer ") + String(static_cast<unsigned long>(doc["left"] | 0)) + (label.length() ? " " + label : "");
   } else if (!strcmp(type, "snapshot")) {
     cmd = String("snapshot ") + (doc["size"] | "xga");
   } else if (!strcmp(type, "stream")) {

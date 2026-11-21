@@ -16,6 +16,7 @@
 #include "mic.h"
 #include "servo_neck.h"
 #include "speaker.h"
+#include "timer_badge.h"
 
 #if __has_include("secrets.h")
 #include "secrets.h"
@@ -151,6 +152,7 @@ void printHelp() {
   Serial.println(F("  glance on|off  allow idle head glances (only happen while the brain is connected and he is awake)"));
   Serial.println(F("  volume <0-1> speaker volume"));
   Serial.println(F("  beep         play a test tone through the speaker"));
+  Serial.println(F("  timer <s> [label]  show a countdown on the screen (timer 0 clears it)"));
   Serial.println(F("  oled off|on | oled <cmd> [arg]  screen power, or a raw SSD1309 command in hex (whine hunting)"));
   Serial.println(F("  mic on|off   stream the microphone to the brain"));
   Serial.println(F("  miclevel     print mic level for 3 s (talk to it)"));
@@ -298,6 +300,15 @@ static void runCommand(String line) {
   } else if (cmd == "volume") {
     speaker.setVolume(arg.toFloat());
     Serial.printf("volume -> %.2f\n", arg.toFloat());
+  } else if (cmd == "timer") {
+    // timer <seconds> [label]: a countdown on the screen (the brain sends it); timer 0 clears it
+    int sp = arg.indexOf(' ');
+    String secs = sp < 0 ? arg : arg.substring(0, sp);
+    String label = sp < 0 ? String() : arg.substring(sp + 1);
+    label.replace("_", " ");
+    label.trim();
+    timer_badge::set(static_cast<uint32_t>(secs.toInt()), label.c_str());
+    Serial.printf("timer -> %s s %s\n", secs.c_str(), label.c_str());
   } else if (cmd == "beep") {
     // 0.4 s of 440 Hz so the amp can be checked without the brain.
     static int16_t tone[16000 * 4 / 10];
