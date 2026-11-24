@@ -45,8 +45,9 @@ import time
 
 import websockets
 
-from . import computer, config, decisions, faces, mouth, personality, settings
+from . import computer, config, decisions, drawing, faces, mouth, personality, pictionary, settings
 from . import focus as focus_mode
+from . import watch as watch_mode
 from .body import Body
 from .dance import Dancer, length as dance_length
 from .thinking import Interrupted, RobotBrain
@@ -58,6 +59,7 @@ from .tracker import Tracker
 robot_socket: websockets.ServerConnection | None = None
 robot_peer: str | None = None      # the connected robot's address, and when it last sent anything (it sends a
 robot_heard_at = 0.0               # heartbeat every 5 s, and mic audio and camera frames far more often)
+robot_fw = ""                      # its firmware version, from its hello
 _greeting = 0                      # connections still saying hello (each may hold a message for up to 2 s)
 MAX_GREETING = 8
 MIN_TOKEN_LEN = 16
@@ -75,6 +77,8 @@ tracker: Tracker | None = None
 perception: Perception | None = None
 body: Body | None = None   # small head moves while he talks (body.py)
 focus = focus_mode.Focus()   # focus sessions: he keeps you off your phone (focus.py)
+watcher = watch_mode.Watcher()   # "tell me when the water boils" (watch.py)
+watch_pose: tuple[float, float] | None = None   # where his head pointed when he started watching
 # The newest sharp still from the robot (rotated like the stream) and when it arrived; asked for as soon as you
 # start talking, so it's ready by the time the question is.
 snapshot: tuple[bytes, float] = (b"", 0.0)
@@ -185,7 +189,7 @@ def robot_health(hello: dict) -> str:
 
 
 async def handle_robot(websocket: websockets.ServerConnection) -> None:
-    global robot_socket, roam_moving_until, robot_peer, robot_heard_at, _greeting
+    global robot_socket, roam_moving_until, robot_peer, robot_heard_at, robot_fw, _greeting
     peer = websocket.remote_address[0] if websocket.remote_address else "?"
     # Anyone on the WiFi can reach this port, so the first message must be a
     # hello carrying the shared token from server/.env. Anything else is
@@ -234,6 +238,7 @@ async def handle_robot(websocket: websockets.ServerConnection) -> None:
         asyncio.create_task(old.close(1012))
     robot_socket = websocket
     robot_peer, robot_heard_at = peer, time.time()
+    robot_fw = str(hello.get("fw", ""))
     print(f"robot connected! (fw {hello.get('fw', '?')}, {peer}{robot_health(hello)})")
     pick_mic_source()
     await update_robot_mic()
@@ -380,16 +385,22 @@ async def look(args: dict) -> tuple:
     move_pan = move_tilt = False
     d = args.get("direction")
     try:
-        amount = float(args["degrees"]) if args.get("degrees") is not None else None
+        amount = abs(float(args["degrees"])) if args.get("degrees") is not None else None
     except (TypeError, ValueError):
         amount = None
+    # degrees: that much further from where the head is ("a little more down": 10 from -20 is -30, not -10). None: a
+    # normal look that way (40 to the side, 20 up or down), or LOOK_AGAIN_DEG further if it's already there ("head
+    # down" said twice goes further down, not to the same -20).
     if d in ("left", "right"):
-        deg = amount if amount is not None else 40.0
-        pan, move_pan = (-deg if d == "left" else deg), True
-    elif d == "up":
-        tilt, move_tilt = (amount if amount is not None else 20.0), True
-    elif d == "down":
-        tilt, move_tilt = -(amount if amount is not None else 20.0), True  # a normal glance; ask for degrees to go to the limit
+        sign = -1 if d == "left" else 1
+        pan = pan + sign * amount if amount is not None else \
+            (pan + sign * LOOK_AGAIN_DEG if sign * pan >= 40.0 - 1 else sign * 40.0)
+        move_pan = True
+    elif d in ("up", "down"):
+        sign = 1 if d == "up" else -1
+        tilt = tilt + sign * amount if amount is not None else \
+            (tilt + sign * LOOK_AGAIN_DEG if sign * tilt >= 20.0 - 1 else sign * 20.0)
+        move_tilt = True
     elif d == "level":
         tilt, move_tilt = 0.0, True
     elif d == "center":
@@ -409,6 +420,8 @@ async def look(args: dict) -> tuple:
             await send_to_robot({"type": "tilt", "deg": tilt})
         if tracker is not None:
             tracker.note_pose(pan=pan if move_pan else None, tilt=tilt if move_tilt else None)
+        if watcher.active:
+            watch_here(pan, tilt)   # "move your head down so you can see the pot": watch there now
         if not see:
             return (_head_now(pan, tilt) + " Moved only, as asked: no picture. Say where your head went, "
                     "nothing about the room.", None, True)
@@ -432,6 +445,7 @@ def _head_now(pan: float, tilt: float) -> str:
     return f"Head is now at pan {pan:.0f} deg ({pan_word}), tilt {tilt:.0f} deg ({tilt_word})."
 
 
+LOOK_AGAIN_DEG = 15.0  # "head down" when it's already down: this much further
 LOOK_SETTLE_S = 0.3  # after the head arrives: WiFi, servo lag, and the head settling before the picture
 
 
@@ -467,6 +481,10 @@ async def fall_asleep() -> None:
     `asleep` and its servos go quiet once they settle there), then eyes shut and the clock screen."""
     if dancer is not None:
         dancer.stop()
+    await stop_pictionary()
+    if watcher.active or watcher.reminding:
+        watcher.stop()   # "Rocky, sleep" (he doesn't doze off while watching)
+    await clear_drawing()
     if body is not None:
         body.stop()
     if tracker is not None and tracker.enabled:
@@ -514,6 +532,152 @@ async def dance() -> tuple:
             "more, and don't describe the dance.", None, True)
 
 
+_drawing_task: asyncio.Task | None = None   # a drawing appearing on his face, stroke by stroke
+drawing_until = 0.0                         # when the drawing on his face goes (0 = none up)
+
+
+def fw_at_least(version: str, wanted: tuple[int, ...]) -> bool:
+    """Whether firmware `version` ("0.4.4") is `wanted` or later. Unknown counts as older."""
+    try:
+        return tuple(int(p) for p in version.split(".")) >= wanted
+    except ValueError:
+        return False
+
+
+async def _show_drawing(pictures: list, hold: float) -> None:
+    """Send the drawing as it appears, then hold it; the robot puts his face back on its own after `hold` s."""
+    global drawing_until
+    step = config.DRAW_ANIMATE_S / max(len(pictures), 1)
+    for i, img in enumerate(pictures):
+        if i:
+            await asyncio.sleep(step)
+        await send_to_robot({"type": "drawing", "xbm": drawing.xbm(img), "ms": int(hold * 1000)})
+        drawing_until = time.time() + hold
+
+
+async def clear_drawing() -> None:
+    """His face back now, if a drawing is up (a new question, or bed)."""
+    global _drawing_task, drawing_until
+    if _drawing_task is not None:
+        _drawing_task.cancel()
+        _drawing_task = None
+    if time.time() < drawing_until:
+        await send_to_robot({"type": "drawing", "ms": 0})
+    drawing_until = 0.0
+
+
+def cant_draw() -> str | None:
+    """Why there's no face screen to draw on right now, for the model; None when there is."""
+    if robot_socket is None:
+        return "No body connected: you have no face screen to draw on right now."
+    if not fw_at_least(robot_fw, (0, 4, 4)):
+        return (f"Your face screen can't show drawings yet: its firmware is {robot_fw or 'old'} and drawing needs "
+                "0.4.4. Tell your human to update it.")
+    return None
+
+
+async def put_drawing(subject: str, hold: float, rules: str = "") -> int:
+    """Draw `subject` on his face (drawing.py) and keep it up `hold` s. Returns how many strokes it took."""
+    global awake_until, _drawing_task
+    strokes = await asyncio.get_running_loop().run_in_executor(None, drawing.strokes_for, subject, rules)
+    if _drawing_task is not None:
+        _drawing_task.cancel()   # straight from the last drawing to this one: no "face back" between (it flashed up)
+    awake_until = max(awake_until, time.time() + config.DRAW_ANIMATE_S + hold + config.AWAKE_SECONDS)
+    _drawing_task = asyncio.create_task(_show_drawing(drawing.frames(strokes), hold))
+    return len(strokes)
+
+
+async def draw_ability(args: dict) -> tuple:
+    """The `draw` ability: the model draws `subject` as strokes and it appears on his face. Done: his line before
+    it was the reply."""
+    subject = " ".join(str(args.get("subject") or "").split())[:80]
+    if not subject:
+        return ("Nothing to draw: say what.", None)
+    if why := cant_draw():
+        return (why, None)
+    count = await put_drawing(subject, config.DRAW_HOLD_S)
+    return (f"Drawing {subject} on your face now ({count} strokes). Your line before it was enough: say "
+            "nothing more, and don't describe the drawing.", None, True)
+
+
+game = pictionary.Game()
+_next_drawing: asyncio.Task | None = None   # the next Pictionary drawing, being drawn while he talks
+
+
+def _start_next_drawing() -> int:
+    """Pick the next secret thing and start drawing it, in the background (he talks meanwhile; the last drawing
+    stays up until it's ready). Returns its number in the game."""
+    global _next_drawing
+    word = game.pick()
+    game.drawn(word)
+
+    async def draw() -> None:
+        try:
+            await put_drawing(word, config.PICTIONARY_HOLD_S, drawing.GAME_RULES)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            print(f"  (pictionary: couldn't draw {word}: {e})")
+            if game.secret == word:
+                game.secret = None
+
+    _next_drawing = asyncio.create_task(draw())
+    return game.rounds + 1
+
+
+async def stop_pictionary() -> None:
+    """No game: the next drawing isn't coming, and the score's gone."""
+    global _next_drawing
+    if _next_drawing is not None:
+        _next_drawing.cancel()
+        _next_drawing = None
+    game.reset()
+
+
+async def pictionary_ability(args: dict) -> tuple:
+    """The `pictionary` ability. He never knows the drawing up now: a guess is checked here (pictionary.judge) and
+    only then is he told what it was, with the next drawing already on its way. Anything he knew he'd let slip."""
+    action = str(args.get("action") or "start")
+    loop = asyncio.get_running_loop()
+    if action == "start":
+        if why := cant_draw():
+            return (why, None)
+        await stop_pictionary()
+        _start_next_drawing()
+        return ("The first drawing is going up on your face. You don't know what it is either: their guesses are "
+                "checked for you. Say nothing more now.", None, True)
+    secret = game.secret
+    if not game.playing or secret is None:
+        return ("No drawing is up to guess right now: the game is over. Start a new one if they want to play.", None)
+    if action == "hint":
+        text = await loop.run_in_executor(None, pictionary.hint, secret, game.hints)
+        if not text:
+            return ("No hint comes to mind: tell them to look closer at the drawing.", None)
+        game.hints.append(text)
+        return (f"A hint you can give, in your own words (it won't give the answer away; you still don't know the "
+                f"answer): {text}", None)
+    if action == "stop":
+        line = game.score_line()
+        await stop_pictionary()
+        await clear_drawing()
+        return (f"The game is over. The drawing up was {secret}. Final score: {line}. Tell them in one or two short "
+                "lines.", None)
+    guess = " ".join(str(args.get("guess") or "").split())[:100]
+    right = action == "guess" and bool(guess) and await loop.run_in_executor(None, pictionary.judge, secret, guess)
+    game.score(pictionary.RIGHT if right else pictionary.WRONG)
+    verdict = (f"Their guess \"{guess}\" is RIGHT: it was {secret}." if right else
+               f"Their guess \"{guess}\" is WRONG: it was {secret}." if action == "guess" else
+               f"They gave up: it was {secret}.")
+    if why := cant_draw():
+        line = game.score_line()
+        await stop_pictionary()
+        return (f"{verdict} Final score: {line}. The game has to end: {why}", None)
+    number = _start_next_drawing()
+    tell = "right, in your own words" if right else "wrong, and what it was" if action == "guess" else "what it was"
+    return (f"{verdict} Score: {game.score_line()}. Drawing {number} is going up on your face now (you don't know "
+            f"what it is). In one or two short lines, tell them {tell}, and that the next one is coming.", None)
+
+
 async def _before_dancing() -> None:
     """The dance has the head: body language stops, face tracking goes off, no held pose."""
     if body is not None:
@@ -530,6 +694,8 @@ async def start_focus(minutes: float | None, announce: bool) -> str:
     if time.time() >= awake_until:
         awake_until = time.time() + config.AWAKE_SECONDS
         await wake_up()
+    if watcher.active or watcher.reminding:
+        watcher.stop()   # focus mode has the camera (and his attention) now
     text = focus.start(minutes)
     if announce:
         asyncio.create_task(converse(focus.note("start"), interruptible=False))
@@ -567,12 +733,64 @@ def focus_busy() -> bool:
     return thinking or speaking_now() or (dancer is not None and dancer.dancing)
 
 
+async def watch_ability(args: dict) -> tuple:
+    """The `watch_for` ability: watch (watch.py) where the head points now, or stop. Done: his line before it was
+    the reply."""
+    global watch_pose
+    if args.get("stop"):
+        return (watcher.stop(), None, True)
+    event = " ".join(str(args.get("event") or "").split())[:100]
+    question = " ".join(str(args.get("question") or "").split())[:400]
+    if not event or not question:
+        return ("Say what to watch for: event and question.", None)
+    if eyes.latest() is None:
+        return ("Your camera has no picture right now, so you can't watch anything.", None)
+    if tracker is not None:
+        if tracker.enabled:
+            await set_tracking(False, announce=False)   # following a face would turn him away from it
+        watch_pose = (tracker.pan, tracker.tilt)
+    return (watcher.start(event, question, args.get("minutes"), bool(args.get("urgent"))), None, True)
+
+
+def watch_here(pan: float, tilt: float) -> None:
+    """Where the watch looks from now on: the head was moved there on purpose (a look, the dashboard)."""
+    global watch_pose
+    if watch_pose != (pan, tilt):
+        watch_pose = (pan, tilt)
+        print(f"watch: now watching at pan {pan:.0f}, tilt {tilt:.0f}")
+
+
+async def watch_aim() -> None:
+    """The head back where it pointed when he started watching, if something turned it since (a look, a dance)."""
+    if tracker is None or watch_pose is None or tracker.enabled:
+        return
+    pan, tilt = watch_pose
+    if abs(tracker.pan - pan) < 1 and abs(tracker.tilt - tilt) < 1:
+        return
+    await send_to_robot({"type": "pan", "deg": pan})
+    await send_to_robot({"type": "tilt", "deg": tilt})
+    tracker.note_pose(pan=pan, tilt=tilt)
+    await asyncio.sleep(config.WATCH_SETTLE_S)
+
+
+async def watch_react(event: str) -> None:
+    """It happened ("found"), you haven't answered ("remind"), or he's giving up ("timeout", "failed"): he says so
+    in his own words, awake, and talk nearby doesn't cut him off."""
+    global awake_until
+    awake_until = max(awake_until, time.time() + config.AWAKE_SECONDS)   # so "thanks!" reaches him without his name
+    await wake_up()
+    await converse(watcher.note(event), interruptible=False)
+
+
 main_loop: asyncio.AbstractEventLoop | None = None
 ABILITIES = {
     "look": _sync(look),
     "track_face": _sync(lambda args: set_tracking(bool(args.get("on", True)))),
     "dance": _sync(lambda args: dance()),
+    "draw": _sync(draw_ability),
+    "pictionary": _sync(pictionary_ability),
     "focus_mode": _sync(focus_ability),
+    "watch_for": _sync(watch_ability),
     # the computer abilities (computer.py) are plain functions: no event loop, nothing sent to the robot
     **{name: (lambda fn: lambda args: (fn(args), None))(fn) for name, fn in computer.ACTIONS.items()},
 }
@@ -1092,6 +1310,8 @@ async def converse(question: str, ended_at: float | None = None, heard_at: float
     if heard_at is not None:
         tl.marks["heard"] = heard_at
     speech_started.clear()
+    if not game.playing:
+        await clear_drawing()   # a new question: his face back from the last drawing (not mid-game: you're guessing)
     await send_to_robot({"type": "emotion", "name": "thinking"})
     camera_wanted = config.SEND_CAMERA_TO_BRAIN and wants_camera(question)
     passive = False
@@ -1135,7 +1355,7 @@ async def converse(question: str, ended_at: float | None = None, heard_at: float
         eyes.last_said = reply.text
         if config.DEBUG_TTS_CHECK and reply.pcm:
             loop.run_in_executor(None, check_tts, reply.text, b"".join(reply.pcm))
-    awake_until = time.time() + config.AWAKE_SECONDS
+    awake_until = max(awake_until, time.time() + config.AWAKE_SECONDS)   # a drawing may keep him up longer
     tl.report()
     return True
 
@@ -1274,6 +1494,8 @@ async def _console_command(action: str, payload: dict) -> dict:
         await send_to_robot({"type": "tilt", "deg": tilt})
         if tracker is not None:
             tracker.note_pose(pan=pan, tilt=tilt)
+        if watcher.active:
+            watch_here(pan, tilt)
     elif action == "center":
         if body is not None:
             body.stop()
@@ -1480,7 +1702,7 @@ async def doze_loop() -> None:
     was_awake = False
     while True:
         await asyncio.sleep(1)
-        awake = time.time() < awake_until or focus.active
+        awake = time.time() < awake_until or focus.active or watcher.active   # dozing would center the head
         if was_awake and not awake:
             print(f"({config.ROBOT_NAME} dozed off — say \"hey {config.ROBOT_NAME}\" to wake him)")
             await fall_asleep()
@@ -1536,9 +1758,20 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
         return
     print(f"{config.HUMAN_NAME}: {text}")
     eyes.last_heard = text
+    watcher.heard()   # your answer to "the water is boiling!": no more reminders
     awake_until = time.time() + config.AWAKE_SECONDS  # anything you say keeps him up
     norm = normalize(text)
     lines = personality.LINES
+    if (watcher.active or watcher.reminding) and any(p in norm for p in config.WATCH_STOP_PHRASES) \
+            and not any(p in norm for p in config.TRACK_ON_PHRASES):
+        # "stop watching" is face tracking's too (TRACK_OFF_PHRASES): while he watches something, it means that.
+        if woke:
+            await wake_up()
+        event = watcher.event
+        watcher.stop()
+        await converse(f"({config.HUMAN_NAME} asked you to stop watching for {event}, so you have stopped. Say so in "
+                       "one short line, in character. Use no abilities.)", interruptible=False)
+        return
     if any(p in norm for p in config.TRACK_ON_PHRASES) and not any(p in norm for p in config.TRACK_OFF_PHRASES):
         if woke:
             await wake_up()
@@ -1566,10 +1799,11 @@ async def _handle_heard(item: tuple[str, float, float, float]) -> None:
         awake_until = 0.0  # say() doesn't touch it, but be explicit
         return
     if woke:
-        # Heard his name: eyes open, head back to eye level.
+        # Heard his name: eyes open, head back to eye level. Not when he was told where to look (head_held) or is
+        # watching something: "hey Rocky, tell me when this pot boils" mustn't lift his eyes off the pot.
         await wake_up()
         await send_to_robot({"type": "emotion", "name": "surprised"})
-        if tracker is None or not tracker.tracking:
+        if (tracker is None or not tracker.tracking) and not head_held and not watcher.active:
             await send_to_robot({"type": "tilt", "deg": 0})
             if tracker is not None:
                 tracker.note_pose(tilt=0)
@@ -1620,15 +1854,22 @@ async def main() -> None:
     apply_settings(settings.load())
     loop = asyncio.get_running_loop()
     main_loop = loop
-    brain = RobotBrain(ABILITIES, quick=computer.QUICK, extra_tools=lambda: (
-        computer.tools(computer.controller) + ([focus_mode.TOOL] if decisions.available() else [])))
+    brain = RobotBrain(
+        ABILITIES, quick=computer.QUICK,
+        extra_tools=lambda: computer.tools(computer.controller) + (
+            [focus_mode.TOOL, watch_mode.TOOL] if decisions.available() else []),   # both need the Decisions API
+        # Pictionary: he never names the drawing up now, and says nothing before checking a guess (he'd guess the
+        # result, or the answer)
+        unsayable=lambda sentence: game.playing and pictionary.names(game.secret, sentence),
+        wordless=lambda: {"pictionary"} if game.playing else set())
     tracker = Tracker(eyes, lambda p, t, on: loop.call_soon_threadsafe(head_moves.put_nowait, (p, t, on)))
     body = Body(send_to_robot, tracker)
     dancer = Dancer(send_to_robot, tracker)
     dancer.ready = lambda: not thinking and not speaking_now()
     dancer.before = _before_dancing
     body.allowed = lambda: (robot_socket is not None and time.time() < awake_until and not tracker.enabled
-                            and current_emotion != "sleepy" and not dancer.dancing)
+                            and current_emotion != "sleepy" and not dancer.dancing
+                            and not watcher.active)   # watching: his eyes stay on it
     eyes.has_annotator = True
     perception = Perception(eyes, lambda name: asyncio.run_coroutine_threadsafe(gesture_seen(name), loop))
     perception.awake = lambda: time.time() < awake_until
@@ -1639,6 +1880,11 @@ async def main() -> None:
     focus.frame = eyes.latest
     focus.busy = focus_busy
     focus.react = focus_react
+    watcher.frame = eyes.latest
+    watcher.busy = lambda: focus_busy() or body.moving()
+    watcher.listening = lambda: ears is not None and ears.hearing
+    watcher.aim = watch_aim
+    watcher.react = watch_react
     perception.start()
     tracker.start()
     print("face tracking:", "on" if config.TRACKING else f"off — say \"{config.ROBOT_NAME}, track me\" or type `track on`")

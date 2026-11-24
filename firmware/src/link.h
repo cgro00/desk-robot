@@ -29,6 +29,8 @@ class Link {
   void onSettings(SettingsHandler h) { onSettings_ = std::move(h); }
   // The brain's `face` message (a face pack), passed on as the raw JSON.
   void onFace(SettingsHandler h) { onFace_ = std::move(h); }
+  // The brain's `drawing` message (a picture for the screen), passed on as the raw JSON.
+  void onDrawing(SettingsHandler h) { onDrawing_ = std::move(h); }
   // Adds fields to the hello sent on every (re)connect.
   void onHello(std::function<void(JsonDocument&)> h) { onHello_ = std::move(h); }
 
@@ -53,6 +55,7 @@ class Link {
   AudioHandler onAudio_;
   SettingsHandler onSettings_;
   SettingsHandler onFace_;
+  SettingsHandler onDrawing_;
   std::function<void(JsonDocument&)> onHello_;
   const char* ssid_ = nullptr;
   const char* pass_ = nullptr;

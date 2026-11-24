@@ -10,7 +10,7 @@ frames start with one type byte: `0x01` = mic audio, `0x02` = camera JPEG,
 ## Robot → server
 
 ```json
-{"type": "hello", "who": "desk-robot", "fw": "0.4.3", "token": "...",   // must be the first message; token = ROBOT_TOKEN
+{"type": "hello", "who": "desk-robot", "fw": "0.4.4", "token": "...",   // must be the first message; token = ROBOT_TOKEN
  "boot": "power on", "up_s": 3600, "rssi": -58, "tx_low": true,
  "wifi_drops": 1, "link_drops": 2, "drop_reason": 200, "drop_ago_s": 900, "down_s": 4.2,
  "stall_ms": 0, "face_gap_ms": 0}
@@ -62,6 +62,10 @@ Binary `0x03` frames: one sharp still (JPEG), the answer to a `snapshot` request
                                   // the clock screen's settings (from server/settings.json); the robot keeps them in flash
 {"type": "face", "save": true, "pack": {...}}   // a face pack (server/faces/*.json, minus its description); save = keep it
                                   // in flash (false while the dashboard previews an edit)
+{"type": "drawing", "xbm": "...", "ms": 10000}  // 0.4.4+: a picture in place of the face for ms (at most 60 s), while
+                                  // awake. xbm = base64 of 1024 bytes: 64 rows of 16, the leftmost pixel in each
+                                  // byte's lowest bit. Sent again as each stroke is added; ms 0 = the face back now.
+                                  // Older firmware ignores it.
 ```
 
 `settings` keys: `tz` POSIX time zone rule; `h24` 24-hour clock; `dmy` day

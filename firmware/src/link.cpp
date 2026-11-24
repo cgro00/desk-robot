@@ -202,6 +202,9 @@ void Link::handleMessage(const char* json) {
   } else if (!strcmp(type, "face")) {
     if (onFace_) onFace_(json);
     return;
+  } else if (!strcmp(type, "drawing")) {
+    if (onDrawing_) onDrawing_(json);
+    return;
   } else if (!strcmp(type, "motion")) {
     // {"type":"motion","axis":"pan","speed":450,"accel":4000}: the neck's speed limits (dances run it fast)
     cmd = String("motion ") + (doc["axis"] | "pan") + " " + String(doc["speed"] | 0.0f, 0) + " " +

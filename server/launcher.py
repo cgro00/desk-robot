@@ -76,6 +76,10 @@ class Brain:
         self.started_at: float | None = None
         self.exit_code: int | None = None
         self.lock = threading.Lock()
+        # Start, stop and restart one at a time. Two at once (a Restart click while another restart was under way)
+        # started two brains: the second found the ports taken and quit, the launcher kept that one, and the
+        # running brain looked "started elsewhere" with nothing able to stop it.
+        self.control = threading.RLock()
 
     def running(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
@@ -102,6 +106,10 @@ class Brain:
             self.lines.append((self.seq, text))
 
     def start(self) -> str:
+        with self.control:
+            return self._start()
+
+    def _start(self) -> str:
         if self.running():
             return "already running"
         if self.external():
@@ -126,6 +134,16 @@ class Brain:
         return "started"
 
     def stop(self) -> str:
+        with self.control:
+            return self._stop()
+
+    def restart(self) -> str:
+        with self.control:
+            self._stop()
+            time.sleep(0.5)
+            return self._start()
+
+    def _stop(self) -> str:
         if not self.running():
             return "a brain started elsewhere: stop it where it runs" if self.external() else "not running"
         proc = self.proc
@@ -216,12 +234,11 @@ def active_name() -> str:
 
 def restart_brain() -> bool:
     """Restart a brain we started, so it picks up a new character. False if it isn't running here."""
-    if not brain.running():
-        return False
-    brain.stop()
-    time.sleep(0.5)
-    brain.start()
-    return True
+    with brain.control:
+        if not brain.running():
+            return False
+        brain.restart()
+        return True
 
 
 def reload_brain() -> bool:
@@ -369,9 +386,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/launcher/stop":
                 return self._json(200, {"ok": True, "result": brain.stop()})
             if path == "/launcher/restart":
-                brain.stop()
-                time.sleep(0.5)
-                return self._json(200, {"ok": True, "result": brain.start()})
+                return self._json(200, {"ok": True, "result": brain.restart()})
             if path == "/launcher/console":
                 brain.send(str(self._body().get("line", "")))
                 return self._json(200, {"ok": True})

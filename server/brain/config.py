@@ -268,6 +268,36 @@ FOCUS_TURN_S = 1.2                 # s of face tracking to turn to you before he
 FOCUS_STOP_PHRASES = ["stop focus", "end focus", "stop the focus", "end the focus", "cancel focus",
                       "stop focusing", "focus off", "turn off focus"]
 
+# Watching for something ("Rocky, tell me when the water boils", brain/watch.py): a yes/no question about the camera
+# picture, asked of the Decisions API every few seconds (needs OPENAI_API_KEY, like focus mode).
+WATCH_MINUTES = 30.0               # how long he watches when no time is asked for
+WATCH_CHECK_EVERY = 3.0            # s between looks
+WATCH_LOG_EVERY_LOOK = False       # print every look's score (True, for testing; False: only 0.5 and up)
+WATCH_YES_PROB = 0.8               # a look counts as "it happened" at this probability or more
+WATCH_STREAK = 2                   # ...this many looks in a row before he tells you (one odd frame isn't enough)
+WATCH_NO_PROB = 0.3                # yeses only count after a look below this (it wasn't so yet)
+WATCH_REMIND_EVERY = 45.0          # s between reminders when you haven't answered him
+WATCH_REMINDERS = 3                # reminders at most
+WATCH_URGENT_EVERY = 3.0           # urgent things (water boiling): s after his last line before he says it again,
+WATCH_URGENT_REMINDERS = 40        # ...more panicked each time, until you answer (or this many times: a few minutes)
+WATCH_MAX_FAILURES = 20            # looks in a row that fail (no internet...) before he gives up and says so
+# While he watches something these stop the watch (without his name too, in the follow-up window), not tracking.
+WATCH_STOP_PHRASES = ["stop watching", "quit watching", "stop looking", "you can stop", "cancel the watch",
+                      "stop the watch", "never mind the", "nevermind the"]
+WATCH_SETTLE_S = 1.0               # s after turning the head back to the watched spot before the next look
+
+# Drawing on his face ("Rocky, draw a spaceship", brain/drawing.py): the language model draws it as strokes, and the
+# screen shows it appearing line by line in place of his eyes. Needs firmware 0.4.4 or later.
+DRAW_MODEL = ""                    # "" = MODEL; a stronger model draws better, a slower one keeps you waiting
+DRAW_TIMEOUT = 12.0                # s for the model to answer (it takes ~5)
+DRAW_MAX_STROKES = 60
+DRAW_ANIMATE_S = 3.0               # s for the pen to draw it all
+DRAW_FRAMES = 30                   # pictures sent while it draws (each ~1.4 KB)
+DRAW_HOLD_S = 10.0                 # s the finished drawing stays up before his face comes back
+# Pictionary ("Rocky, let's play Pictionary", brain/pictionary.py): he draws something secret and you guess.
+PICTIONARY_HOLD_S = 60.0           # s a drawing stays up for you to guess (the firmware's longest)
+PICTIONARY_IDLE_S = 300.0          # no new drawing for this long: the game is over
+
 # Face tracking: the head follows the biggest face in the picture.
 # Off until you ask ("Rocky, track me"); phrases below switch it without a
 # brain call, and Rocky can also switch it himself when asked in other words.

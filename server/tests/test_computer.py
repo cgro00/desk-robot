@@ -430,6 +430,13 @@ class BrainTests(unittest.TestCase):
         self.assertEqual(done, [{"q": 1}])
         self.assertEqual(len(b.client.calls), 1)
 
+    def test_cut_off_arguments_dont_break_the_next_call(self):
+        # max_tokens ends the reply mid-arguments: they go back to the model as {}, not as broken JSON (a 400)
+        b = self.brain([[_chunk("Turning. "), _chunk(call=("look", '{"direction": "le'))],
+                        [_chunk("Could not, human.")]], lambda a: ("unused", None))
+        self.assertEqual(list(b.reply("look left")), ["Turning.", "Could not, human."])
+        self.assertEqual(b.history[1]["tool_calls"][0]["function"]["arguments"], "{}")
+
     def test_head_turn_without_a_picture_ends_after_his_line(self):
         # "turn your head left": look with see false moves the head, takes no picture, and says it's done
         moved = []

@@ -42,6 +42,7 @@ _SENTENCE_END = re.compile(r"(?<=[!?])\s+|(?<=[^.]\.)(?<!\bMr\.)(?<!\bMrs\.)(?<!
 _REASONING = re.compile(r"\b(?:detectors?|the note|note says|the question is|question is about|is an? (?:\w+ )?question about|"
                         r"knowledge question|the user|"
                         r"my instructions|the instructions say|system prompt|"
+                        r"(?:calling|using|checking|check) (?:the )?(?:tool|ability|pictionary)|guess check|"
                         r"i should (?:look|use|call|check|get|describe|answer))\b", re.IGNORECASE)
 
 
@@ -93,9 +94,9 @@ TOOLS = [
                     "degrees": {
                         "type": "number",
                         "description": (
-                            f"How far: 5-{config.TRACK_PAN_LIMIT:.0f} for left/right, "
-                            f"5-{max(config.TRACK_TILT_MAX, -config.TRACK_TILT_MIN):.0f} for up/down. "
-                            "Omit for a normal look."
+                            "How much FURTHER to move from where your head is now (\"a little more down\": 10). "
+                            "Omit for a normal look that way, or to go a bit further if you're already looking "
+                            "that way."
                         ),
                     },
                     "see": {
@@ -127,6 +128,59 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "draw",
+            "description": (
+                "Draw a simple picture on your face screen: it appears line by line in place of your eyes and stays "
+                "about 10 seconds. Use it when your human asks you to draw, sketch or doodle something, or to show "
+                "them a picture of it. Say one short line first (or nothing); the drawing appears as you finish it. "
+                "Don't describe the drawing. For Pictionary, use `pictionary` instead."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subject": {
+                        "type": "string",
+                        "description": (
+                            "What to draw, in a few plain words (\"a spaceship\", \"a cat sleeping\"). The screen is "
+                            "tiny: ask for the simplest version (\"a blinking LED circuit\", not every part in it)."
+                        ),
+                    },
+                },
+                "required": ["subject"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "pictionary",
+            "description": (
+                "Play Pictionary: you draw a secret thing on your face screen and your human guesses what it is. "
+                "You don't know what you drew (it's picked at random) until a guess or giving up reveals it: this "
+                "ability checks their guesses for you. Use it when they want to play Pictionary or a drawing "
+                "guessing game (start); whenever they guess what the drawing is (guess, with their words: one guess "
+                "per drawing, and the next one goes up straight away); when they give up on one (give_up); when they "
+                "ask for a hint (hint); and when they're done playing (stop). For guess, give_up, hint and stop, use "
+                "it straight away with no words before it (you don't know the answer until it tells you), and never "
+                "mention using it or checking. Before start, one short line that you're drawing. Anything else they "
+                "say mid-game is not a guess: just answer it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["start", "guess", "give_up", "hint", "stop"]},
+                    "guess": {
+                        "type": "string",
+                        "description": "With guess: what they think it is, in their words (\"a toaster\").",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "track_face",
             "description": "Start or stop following the human's face with your head.",
             "parameters": {
@@ -148,28 +202,40 @@ def _image_part(jpeg: bytes) -> dict:
     return {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
 
 
+def reasoning_switch() -> dict:
+    """The request's extra body that keeps the model's hidden reasoning off, unless config.LLM_REASONING. Each
+    provider has its own switch for it (OpenRouter's "reasoning", Anthropic's "thinking"); other providers get
+    nothing extra. Left on, a model can decide a request is hard and think first: slower, and the thinking counts
+    against max_tokens (a drawing of a schematic ran out before it drew anything)."""
+    if config.LLM_REASONING:
+        return {}
+    if "openrouter.ai" in config.LLM_BASE_URL:
+        return {"reasoning": {"enabled": False}}
+    if "api.anthropic.com" in config.LLM_BASE_URL:
+        return {"thinking": {"type": "disabled"}}
+    return {}
+
+
 class RobotBrain:
     def __init__(self, actions: dict[str, Action] | None = None,
-                 extra_tools: Callable[[], list[dict]] | None = None, quick: set[str] | None = None) -> None:
+                 extra_tools: Callable[[], list[dict]] | None = None, quick: set[str] | None = None,
+                 unsayable: Callable[[str], bool] | None = None,
+                 wordless: Callable[[], set[str]] | None = None) -> None:
+        """unsayable(sentence): True drops that sentence (a game's answer). wordless(): abilities whose lead-in isn't
+        said right now (a Pictionary guess: he doesn't know yet if it's right). While there are any, his words wait
+        until the reply is written, to see whether one of them comes after."""
         self.client = openai.OpenAI(
             base_url=config.LLM_BASE_URL,
             api_key=os.environ.get("LLM_API_KEY", "missing"),
             default_headers={"X-Title": "desk-robot"},  # shows up in OpenRouter's usage page; others ignore it
         )
-        # The model's hidden reasoning, off unless config.LLM_REASONING. Each provider has its own switch for it
-        # (OpenRouter's "reasoning", Anthropic's "thinking"); other providers get nothing extra.
-        if config.LLM_REASONING:
-            self._extra = {}
-        elif "openrouter.ai" in config.LLM_BASE_URL:
-            self._extra = {"reasoning": {"enabled": False}}
-        elif "api.anthropic.com" in config.LLM_BASE_URL:
-            self._extra = {"thinking": {"type": "disabled"}}
-        else:
-            self._extra = {}
+        self._extra = reasoning_switch()
         self.history: list[dict] = []
         self.actions = actions or {}
         self.extra_tools = extra_tools or (lambda: [])
         self.quick = quick or set()
+        self.unsayable = unsayable or (lambda sentence: False)
+        self.wordless = wordless or set
         self.emotion = "neutral"        # emotion of the reply in progress
         self._inflight: tuple[int, dict] | None = None  # (index, user message) being answered
 
@@ -270,13 +336,15 @@ class RobotBrain:
                 raise Interrupted()
             stream = self.client.chat.completions.create(
                 model=config.MODEL,
-                max_tokens=200,  # backstop; the sentence limit does the real work
+                max_tokens=500,  # backstop; the sentence limit does the real work (abilities' arguments need room)
                 messages=[{"role": "system", "content": personality.SYSTEM_PROMPT}, *self.history],
                 tools=[*TOOLS, *self.extra_tools()] if self.actions else openai.NOT_GIVEN,
                 stream=True,
                 extra_body=self._extra,
             )
             buf = ""                 # text not yet released as a sentence
+            quiet = self.wordless()
+            held: list[str] | None = [] if quiet else None   # sentences waiting to see if a wordless call follows
             raw: list[str] = []      # everything the model wrote this round
             tag_decided = False
             calls: dict[int, dict] = {}
@@ -311,10 +379,13 @@ class RobotBrain:
                     parts = _SENTENCE_END.split(buf)
                     while len(parts) > 1:  # everything but the last piece is a whole sentence
                         s = parts.pop(0).strip()
-                        if s and not _thinking_aloud(s):
+                        if s and not self._drop(s):
                             spoken += 1
                             said += 1
-                            yield s
+                            if held is None:
+                                yield s
+                            else:
+                                held.append(s)
                         if spoken >= limit:
                             break
                     buf = parts[-1] if parts else ""
@@ -332,17 +403,32 @@ class RobotBrain:
 
             if calls:
                 # He decided to do something: say any lead-in, run it, tell him what happened.
-                if buf.strip() and not _thinking_aloud(buf.strip()):
+                if buf.strip() and not self._drop(buf.strip()):
                     said += 1
-                    yield buf.strip()
+                    if held is None:
+                        yield buf.strip()
+                    else:
+                        held.append(buf.strip())
                     buf = ""
+                for c in calls.values():
+                    try:
+                        json.loads(c["arguments"] or "{}")
+                    except json.JSONDecodeError:   # cut off (max_tokens): sent back as it is, the next call is a 400
+                        print(f"  ({c['name']} came with broken arguments: {c['arguments'][:120]})")
+                        c["arguments"] = "{}"
                 written = "".join(raw)
+                if held and any(c["name"] in quiet for c in calls.values()):
+                    print(f"  (not said, words before {'/'.join(sorted(quiet))}: {' '.join(held)[:120]})")
+                    said -= len(held)
+                    written = ""
+                else:
+                    yield from held or []
                 self.history.append({
                     "role": "assistant",
                     "content": _without_thinking(written) or (f"[{self.emotion}]" if written.strip() else ""),
                     "tool_calls": [
                         {"id": c["id"], "type": "function",
-                         "function": {"name": c["name"], "arguments": c["arguments"]}}
+                         "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}}
                         for _, c in sorted(calls.items())
                     ],
                 })
@@ -388,8 +474,9 @@ class RobotBrain:
                 continue
             if nudged and self.history and self.history[-1].get("role") == "user":
                 self.history.pop()  # don't keep the nudge in the transcript
+            yield from held or []
             tail = buf.strip()
-            if tail and _thinking_aloud(tail):
+            if tail and self._drop(tail):
                 tail = ""
             if tail and spoken < limit:
                 yield tail
@@ -404,6 +491,15 @@ class RobotBrain:
         if on_emotion is not None:
             on_emotion(self.emotion)
         yield "Too many things at once. Ask again, human."
+
+    def _drop(self, sentence: str) -> bool:
+        """A sentence not to say: thinking out loud, or one `unsayable` won't have."""
+        if _thinking_aloud(sentence):
+            return True
+        if self.unsayable(sentence):
+            print(f"  (not said, it gives the game away: {sentence[:120]})")
+            return True
+        return False
 
     def _take_emotion_tag(self, buf: str, final: bool) -> tuple[str, bool]:
         """Look for "[happy] " at the start of the reply. Returns (text with the

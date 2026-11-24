@@ -7,6 +7,7 @@
 #include <U8g2lib.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <mbedtls/base64.h>
 
 #include "camera.h"
 #include "config.h"
@@ -42,6 +43,13 @@ Screen screen = Screen::Home;
 volatile bool roamActive = false;   // the "roam" idle screen is moving the head (roamUpdate)
 uint32_t sleepFaceUntil = 0;
 constexpr uint32_t SLEEP_FACE_MS = 5000;
+// A drawing from the brain ("Rocky, draw a spaceship"): a whole-screen picture shown in place of the face while
+// he's awake, until drawingUntil (0 = none). The brain sends it again as each stroke is added, then once more to
+// hold it; `ms` 0 or going to sleep puts the face back.
+uint8_t drawingBits[128 * 64 / 8];   // XBM: rows top to bottom, 16 bytes a row, lowest bit = leftmost pixel
+uint32_t drawingUntil = 0;
+constexpr uint32_t DRAWING_MAX_MS = 60000;
+bool drawingShown() { return drawingUntil && static_cast<int32_t>(millis() - drawingUntil) < 0; }
 ServoNeck panNeck;
 ServoNeck tiltNeck;
 Link brainLink;
@@ -142,6 +150,7 @@ void printHelp() {
   Serial.println(F("  motion pan|tilt <speed> <accel>  tune head motion live (deg/s, deg/s^2; the brain sends it too)"));
   Serial.println(F("  raw pan|tilt <deg>  calibration move to any head angle the servo can reach, ignoring the limits (watch it!)"));
   Serial.println(F("  blink        blink now"));
+  Serial.println(F("  draw test|off  a test picture in place of the face for 5 s (as the brain's drawings), or the face back"));
   Serial.println(F("  sleep on|off eyes shut, breathing, Z's"));
   Serial.println(F("  demo on|off  wake up and cycle through the faces on his own"));
   Serial.println(F("  home         clock / weather settings and status"));
@@ -238,6 +247,7 @@ static void runCommand(String line) {
   } else if (cmd == "sleep") {
     bool on = arg == "on";
     face.setAsleep(on);
+    if (on) drawingUntil = 0;   // a drawing doesn't outlast him
     if (on) {                   // head home (straight ahead, level) to sleep; the face shows it, then the clock
       panNeck.setTarget(0);
       tiltNeck.setTarget(0);
@@ -251,6 +261,27 @@ static void runCommand(String line) {
     }
     applyGlances();
     Serial.printf("sleep %s\n", face.asleep() ? "on" : "off");
+  } else if (cmd == "draw") {
+    // draw test: a frame, a cross and a dot top left (to check it's the right way up), as a drawing would show
+    if (arg == "test") {
+      memset(drawingBits, 0, sizeof(drawingBits));
+      auto dot = [](int x, int y) {
+        if (x >= 0 && x < 128 && y >= 0 && y < 64) drawingBits[y * 16 + x / 8] |= 1 << (x % 8);
+      };
+      for (int x = 0; x < 128; ++x) { dot(x, 0); dot(x, 63); dot(x, x / 2); dot(x, 63 - x / 2); }
+      for (int y = 0; y < 64; ++y) { dot(0, y); dot(127, y); }
+      for (int y = 4; y < 12; ++y)
+        for (int x = 4; x < 12; ++x) dot(x, y);
+      if (screen != Screen::Face) {
+        screen = Screen::Face;
+        home.restoreDisplay();
+      }
+      drawingUntil = millis() + 5000;
+      Serial.println(F("draw: test picture for 5 s (filled square = top left)"));
+    } else {
+      drawingUntil = 0;
+      Serial.println(F("draw: off"));
+    }
   } else if (cmd == "screen") {
     // what the OLED shows right now, as hex (8 pages x 128 columns, a byte = 8 pixels down), for a screenshot
     uint8_t* buf = u8g2.getBufferPtr();
@@ -431,6 +462,11 @@ static void screenTask(void*) {
           if (assemblyMode) drawAssemblyScreen();
           else home.draw();
         }
+        lastFaceMs = 0;
+      } else if (screen == Screen::Face && drawingShown()) {
+        u8g2.clearBuffer();
+        u8g2.drawXBM(0, 0, 128, 64, drawingBits);
+        u8g2.sendBuffer();
         lastFaceMs = 0;
       } else {
         uint32_t t0 = micros();
@@ -668,6 +704,30 @@ void setup() {
     serializeJson(doc["pack"], pack);
     bool ok = face.applyPackJson(pack.c_str(), doc["save"] | true);
     Serial.printf("face: %s%s\n", ok ? face.packName() : "bad pack from the brain", (doc["save"] | true) ? "" : " (preview)");
+  });
+  brainLink.onDrawing([](const char* json) {
+    // {"type":"drawing","xbm":"<base64 of 1024 bytes>","ms":10000}: show it for ms (again with every new stroke);
+    // {"type":"drawing","ms":0}: the face back
+    Hold held(screenLock);
+    JsonDocument doc;
+    if (deserializeJson(doc, json)) return;
+    uint32_t ms = doc["ms"] | 0;
+    if (ms == 0) {
+      if (drawingShown()) Serial.println(F("drawing: off"));
+      drawingUntil = 0;
+      return;
+    }
+    const char* b64 = doc["xbm"] | "";
+    size_t got = 0;
+    uint8_t bits[sizeof(drawingBits)];
+    if (mbedtls_base64_decode(bits, sizeof(bits), &got, reinterpret_cast<const unsigned char*>(b64), strlen(b64)) ||
+        got != sizeof(bits)) {
+      Serial.println(F("drawing: bad picture from the brain"));
+      return;
+    }
+    if (!drawingShown()) Serial.printf("drawing: on (%lu s)\n", static_cast<unsigned long>(min(ms, DRAWING_MAX_MS) / 1000));
+    memcpy(drawingBits, bits, sizeof(bits));
+    drawingUntil = (millis() + min(ms, DRAWING_MAX_MS)) | 1;   // never 0 (= none)
   });
 #ifndef ROBOT_TOKEN
 #define ROBOT_TOKEN ""

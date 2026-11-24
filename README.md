@@ -19,8 +19,9 @@ matches the version it was made with. [CHANGELOG.md](CHANGELOG.md) lists what
 changed between versions.
 
 Out of the box it is **Rocky**, the Eridian engineer from *Project Hail
-Mary*: short sentences, "question" and "answer", "amaze", and constant
-worry about whether you have slept. Everything about him is yours to change.
+Mary*: short sentences, "question" and "answer", "amaze", and an
+engineer's joy in any problem you bring him. Everything about him is yours
+to change.
 See [Make it your own](#make-it-your-own).
 
 **What it can do**
@@ -35,6 +36,9 @@ See [Make it your own](#make-it-your-own).
   waiting for a fixed pause.
 - Keep you off your phone during a focus session, and say something about
   it, in character, when you slip.
+- Watch for something and say when it happens: "tell me when the cat comes
+  back", "tell me when someone comes in".
+- Draw what you ask for on its face, line by line, or play Pictionary with you.
 
 **How it is put together**
 
@@ -107,8 +111,9 @@ Nothing is billed while the robot is idle.
 - Optionally a **Fish Audio** key for the cloned voice. Without it Rocky
   speaks with your computer's built-in voice, which is fine for getting
   started.
-- Optionally an **OpenAI** key for [focus mode](#focus-mode), even if your
-  language model is elsewhere. It costs about 3 cents a 25-minute session.
+- Optionally an **OpenAI** key for [focus mode](#focus-mode) and
+  ["tell me when"](#tell-me-when), even if your language model is elsewhere.
+  It costs about 3 cents a 25-minute session.
 
 **Skills.** Basic through-hole soldering, and the patience to read
 [Wire it up](#wire-it-up) before powering anything on.
@@ -256,7 +261,7 @@ Open `server/.env` and fill in:
 - `ROBOT_TOKEN`: any random string. The robot will need the same one. Make
   one with `python3 -c "import secrets; print(secrets.token_hex(16))"`.
 - `FISH_AUDIO_API_KEY`: optional, for the cloned voice.
-- `OPENAI_API_KEY`: optional, for [focus mode](#focus-mode).
+- `OPENAI_API_KEY`: optional, for [focus mode](#focus-mode) and ["tell me when"](#tell-me-when).
 
 Then start the dashboard, from the `server` folder:
 
@@ -354,10 +359,13 @@ away from the computer.
 | "Rocky, turn your head left" / "look up" | He turns his head and says so. Nothing about the room unless you ask. |
 | "Rocky, look at the door" / "what's over there?" | He turns his head, takes a fresh picture, and tells you what he sees. |
 | "Rocky, dance!" | One of his four routines at random (groove, robot, sprinkler, disco), about 10 seconds of neck moves on a beat. The dashboard's Head card has a Dance button too. |
+| "Rocky, draw a spaceship" | He draws it on his face: simple line art that appears stroke by stroke in place of his eyes, about 5 seconds after he answers, and stays 10 seconds (or until you ask something else). The language model does the drawing. Needs firmware 0.4.4. |
+| "Rocky, let's play Pictionary" | He draws something secret (picked at random from about 150 easy things) and you say what you think it is. One guess per drawing: he tells you right or wrong (and what it was), then draws the next. You can ask for a hint or say "I give up". "I don't want to play anymore" ends it with your score. The drawing stays up to 60 seconds while you guess, and he answers guesses without his name. He doesn't know what he drew until you guess or give up (the game checks your guess), so chatting mid-game can't give it away. Needs firmware 0.4.4. |
 | "what do you see?" | He describes the current camera frame, and only what is actually in it. |
 | "track me" / "stop tracking" | His head follows your face, or stops. |
 | "Rocky, sleep" / "goodnight" | He says goodnight and stops listening until you say his name. His screen shows the sleep face for a few seconds, then the clock. |
 | "Rocky, help me focus for 25 minutes" | A [focus session](#focus-mode): he answers nothing until it ends, and only speaks up when you pick up your phone. "Hey Rocky, stop focus" ends it early. |
+| "Rocky, tell me when the cat comes back" | He [watches](#tell-me-when) where his head points and tells you when it happens, reminding you if you don't answer. "Rocky, stop watching" stops it. Needs the OpenAI key. |
 
 He decides you are finished the way a person does. A small model listens to
 how your sentence ends; if you sound done he answers about a third of a
@@ -532,6 +540,39 @@ OpenAI too):
 
 Without the key the Focus card says so, and he doesn't offer focus sessions
 by voice. The robot has to be connected, since he watches through its camera.
+
+### Tell me when
+
+Point him at something and say **"Rocky, let me know when my cat comes
+back"**. Other examples: "tell me when someone comes in", "tell me when the
+print is done, it's to your left". He turns your words into one yes-or-no
+question about the camera picture ("is there a cat in the picture?"). Every 3 seconds
+the newest frame goes to the same Decisions API as focus mode. When the answer
+is 80% or more twice in a row, he tells you, in his own words. It only counts
+after a check where it isn't so yet, so "tell me when someone comes in" isn't
+set off by you walking out. If you don't
+answer, he reminds you up to 3 times, 45 seconds apart; anything you say
+counts as an answer. Something urgent (boiling water, a pot boiling over) he
+keeps saying every 3 seconds after he finishes, more panicked each time,
+until you answer (for a few minutes at most). He never makes it sound worse
+than what he saw. "Rocky, stop watching" stops it.
+
+He watches wherever his head points when you ask, unless you tell him where
+the thing is (then he turns there first). Face tracking goes off, he doesn't
+doze off, and if something turns his head meanwhile (a question about the
+room, a dance) it goes back before the next check. You can talk with him as
+usual while he watches. He gives up after 30 minutes unless you ask for
+longer ("watch the printer for two hours", at most 3), and focus mode or
+"Rocky, sleep" ends it. It needs the same OpenAI key, about 1 cent per 10
+minutes.
+
+Tips: he has to be able to see the thing itself. Boiling water is a poor
+fit: from the counter his camera sees the water nearly edge-on, as glare, so
+he can miss it. Looking down at the surface from higher up helps; keep him back from
+the burner either way, since heat and steam are bad for printed parts and
+electronics. It's a helper, not a reason
+to leave a stove alone. The settings are the `WATCH_` ones in
+`server/brain/config.py`, and the code is `server/brain/watch.py`.
 
 ## Make it your own
 
@@ -742,7 +783,10 @@ what Rocky is told he can do. A different screen driver goes near the top of
   `mouth.py` turns text into audio with Fish Audio and levels it for the
   small speaker. `tracker.py` follows faces with OpenCV. `perception.py`
   notices faces and a wave. `focus.py` runs focus sessions, asking OpenAI's
-  Decisions API about the camera frame through `decisions.py`. `eyes.py` serves
+  Decisions API about the camera frame through `decisions.py`, and `watch.py`
+  watches for whatever you asked ("tell me when") the same way. `drawing.py`
+  turns the model's strokes into the pictures his face draws, and
+  `pictionary.py` picks what he draws in Pictionary and keeps score. `eyes.py` serves
   the camera and the Live page. `settings.py` reads and writes
   `settings.json`. `main.py` ties it together.
 - **Launcher** (`server/launcher.py`): the dashboard on port 8766. It starts
@@ -783,9 +827,9 @@ cd server && python -m unittest tests/test_*.py
   plus, if you switch on computer control, open the sites, apps, music and
   Shortcuts on your lists (no typing, clicking or buying). A Shortcut only
   runs after he asks and the next thing said to him starts with a yes. With
-  an OpenAI key, anyone can also start a focus session, which sends camera
-  pictures to OpenAI until it ends (at most 3 hours, about 25 cents) or
-  someone stops it.
+  an OpenAI key, anyone can also start a focus session or a "tell me when"
+  watch, which sends camera pictures to OpenAI until it ends (at most 3
+  hours, about 25 cents) or someone stops it.
 - **What leaves your computer:** each question sends the transcript, the recent
   conversation, your name from `HUMAN_NAME`, a camera picture and the
   face note (while he's awake; turn "A picture with every question"
@@ -798,8 +842,8 @@ cd server && python -m unittest tests/test_*.py
   Open-Meteo for the weather at the location you set (rounded to about
   1 km); the dashboard's town search sends what you type to Open-Meteo.
   With a Spotify key, "play ..." sends the search words to Spotify.
-  **During a focus session**, a camera picture goes to OpenAI every 3
-  seconds, and only then. It is the same picture you see on the Live tab,
+  **During a focus session or a "tell me when" watch**, a camera picture
+  goes to OpenAI every 3 seconds, and only then. It is the same picture you see on the Live tab,
   with you in it. OpenAI's API data policy covers what it keeps and for how
   long (see its data controls; eligible accounts can get Zero Data Retention).
 - **Camera and microphone:** while the brain is connected the robot streams
