@@ -642,6 +642,11 @@ void setup() {
   screenLock = xSemaphoreCreateRecursiveMutex();
   neckLock = xSemaphoreCreateRecursiveMutex();
   Serial.begin(115200);
+  // Plugged into a computer's USB with no serial monitor open, every print waited up to 100 ms for a reader that
+  // never came (the USB CDC's default TX timeout). With a camera that keeps failing to start that added up to
+  // seconds, the link fell behind, and the brain refused the robot for a hello that came 4 s late ("bad or
+  // missing token"). Drop output nobody reads instead.
+  Serial.setTxTimeoutMs(0);
   randomSeed(esp_random());
 
   // ESP32Servo wants its LEDC timers claimed up front.
