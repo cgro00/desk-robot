@@ -3,6 +3,7 @@
   search_web       a search on a fixed list of sites (the URL is built here, never by the model)
   open_website     a site's home page, or one of your bookmarks (settings: computer.bookmarks)
   open_app         an app from your allowed list (settings: computer.apps)
+  open_game        a Steam game installed on this computer (Linux), started through Steam
   media            play / pause / next / previous in Spotify or Music
   play_music       find a song / artist / album / playlist on Spotify and play it (Spotify's search needs a free
                    developer key in server/.env: SPOTIFY_CLIENT_ID + SPOTIFY_CLIENT_SECRET; without one he opens
@@ -40,6 +41,7 @@ import urllib.request
 import webbrowser
 
 MAC = sys.platform == "darwin"
+LINUX = sys.platform.startswith("linux")
 PER_TURN = 3          # actions in one reply
 PER_MINUTE = 8        # actions in any 60 s
 CONFIRM_WINDOW_S = 90.0
@@ -204,7 +206,8 @@ class Computer:
         return f"Opened {match} on your human's screen."
 
     def open_app(self, args: dict) -> str:
-        self._mac_only()
+        if not (MAC or LINUX):
+            raise NotDone("opening apps only works on a Mac or Linux")
         name = str(args.get("name") or "")
         match = next((a for a in self.apps if _key(a) == _key(name)), None)
         if match is None:
@@ -212,11 +215,24 @@ class Computer:
                           "settings")
 
         def go() -> None:
+            if not MAC:
+                _linux_launch(match)
+                return
             code, _, err = self._run(["open", "-a", match], 10)
             if code != 0:
                 raise NotDone(f"{match} didn't open (is it installed?)")
         self._go(f"opened {match}", go)
         return f"Opened {match}."
+
+    def open_game(self, args: dict) -> str:
+        name = str(args.get("name") or "")
+        games = steam_games()
+        match = next((g for g in games if _key(g) == _key(name)), None)
+        if match is None:
+            raise NotDone(f"{name or 'that'} is not one of the Steam games installed on this computer")
+        appid = games[match]
+        self._go(f"started {match} (Steam)", lambda: _steam_run(appid))
+        return f"Started {match}. Steam opens it; a big game takes a moment."
 
     def media(self, args: dict) -> str:
         self._mac_only()
@@ -519,6 +535,134 @@ def _open_url(url: str) -> None:
         raise NotDone("couldn't open a browser on this computer")
 
 
+# ── Linux: apps by their desktop entry (the same list an app launcher shows) ──
+
+def _linux_app_dirs() -> list[str]:
+    home = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    rest = (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")
+    return [os.path.join(d, "applications") for d in [home, *rest] if d]
+
+
+def _linux_find_app(name: str) -> str | None:
+    """The desktop-entry id (e.g. "org.gnome.Calculator") whose Name, or whose id, matches `name`. Hidden and
+    NoDisplay entries are skipped, and the first directory wins, as in a launcher."""
+    want, seen = _key(name), set()
+    for d in _linux_app_dirs():
+        try:
+            files = sorted(f for f in os.listdir(d) if f.endswith(".desktop"))
+        except OSError:
+            continue
+        for f in files:
+            app_id = f[:-len(".desktop")]
+            if app_id in seen:
+                continue
+            seen.add(app_id)
+            fields: dict[str, str] = {}
+            try:
+                with open(os.path.join(d, f), encoding="utf-8", errors="replace") as fh:
+                    section = ""
+                    for line in fh:
+                        line = line.strip()
+                        if line.startswith("["):
+                            section = line
+                        elif section == "[Desktop Entry]" and "=" in line:
+                            k, v = line.split("=", 1)
+                            fields.setdefault(k.strip(), v.strip())
+            except OSError:
+                continue
+            if fields.get("NoDisplay", "").lower() == "true" or fields.get("Hidden", "").lower() == "true":
+                continue
+            if fields.get("Type", "Application") != "Application":
+                continue
+            if want in (_key(fields.get("Name", "")), _key(app_id), _key(app_id.rsplit(".", 1)[-1])):
+                return app_id
+    return None
+
+
+def _linux_launch(name: str) -> None:
+    """Start an app through its desktop entry with gtk-launch (or gio). The app gets its own session, so it keeps
+    running when the server restarts. No shell, and only an id found on disk is passed."""
+    app_id = _linux_find_app(name)
+    if app_id is None:
+        raise NotDone(f"{name} isn't installed on this computer (no app by that name)")
+    import shutil
+    if shutil.which("gtk-launch"):
+        cmd = ["gtk-launch", app_id]
+    elif shutil.which("gio"):
+        path = next((os.path.join(d, app_id + ".desktop") for d in _linux_app_dirs()
+                     if os.path.isfile(os.path.join(d, app_id + ".desktop"))), None)
+        if path is None:
+            raise NotDone(f"{name} didn't open")
+        cmd = ["gio", "launch", path]
+    else:
+        raise NotDone("this computer has neither gtk-launch nor gio to start apps")
+    try:
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError as e:
+        raise NotDone(f"{name} didn't open: {e}") from e
+
+
+# ── Steam games (Linux): the games installed in the Steam libraries, launched through Steam itself ──
+
+_STEAM_ROOTS = ("~/.local/share/Steam", "~/.steam/steam", "~/.var/app/com.valvesoftware.Steam/.local/share/Steam")
+_NOT_GAMES = re.compile(r"^(Proton\b|Steam Linux Runtime|Steamworks Common|SteamVR)", re.I)
+
+
+def _steam_libraries() -> list[str]:
+    out: list[str] = []
+    for root in _STEAM_ROOTS:
+        vdf = os.path.join(os.path.expanduser(root), "steamapps", "libraryfolders.vdf")
+        try:
+            text = open(vdf, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        for path in re.findall(r'"path"\s+"([^"]+)"', text):
+            path = os.path.realpath(path.replace("\\\\", "\\"))
+            if path not in out:
+                out.append(path)
+    return out
+
+
+def steam_games() -> dict[str, str]:
+    """{game name: app id} for every installed game (tools like Proton left out). Names lose their ® and ™ so they
+    can be said. Read fresh each time: a few dozen small files."""
+    games: dict[str, str] = {}
+    for lib in _steam_libraries():
+        apps = os.path.join(lib, "steamapps")
+        try:
+            files = sorted(f for f in os.listdir(apps) if f.startswith("appmanifest_") and f.endswith(".acf"))
+        except OSError:
+            continue
+        for f in files:
+            try:
+                text = open(os.path.join(apps, f), encoding="utf-8", errors="replace").read()
+            except OSError:
+                continue
+            appid = re.search(r'"appid"\s+"(\d+)"', text)
+            name = re.search(r'"name"\s+"([^"]+)"', text)
+            if not appid or not name:
+                continue
+            clean = re.sub(r"[®™©]", "", name.group(1)).strip()
+            if clean and not _NOT_GAMES.match(clean):
+                games.setdefault(clean, appid.group(1))
+    return dict(sorted(games.items(), key=lambda kv: kv[0].lower()))
+
+
+def _steam_run(appid: str) -> None:
+    """steam://rungameid/<digits>: Steam starts the game (and itself first, if it isn't running)."""
+    if not appid.isdigit():
+        raise NotDone("not a Steam game")
+    import shutil
+    url = f"steam://rungameid/{appid}"
+    cmd = ["steam", url] if shutil.which("steam") else ["xdg-open", url]
+    try:
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError as e:
+        raise NotDone(f"Steam didn't start: {e}") from e
+
+
 # ── What the model sees ──────────────────────────────────────────────────────
 
 _SAY = " Say one short line as you call it (like \"Opening Amazon.\"); that's all, no need to wait for a result."
@@ -541,10 +685,16 @@ def tools(c: Computer) -> list[dict]:
         _fn("open_website", "Open a website's home page on your human's computer." + _SAY,
             {"name": {"type": "string", "enum": sites}}, ["name"]),
     ]
+    if (MAC or LINUX) and c.apps:
+        out.append(_fn("open_app", "Open an app on your human's computer." + _SAY,
+                       {"name": {"type": "string", "enum": c.apps}}, ["name"]))
+    if LINUX:
+        games = list(steam_games())
+        if games:
+            out.append(_fn("open_game", "Start one of the Steam games installed on your human's computer, when they "
+                           "ask to play or start a game." + _SAY,
+                           {"name": {"type": "string", "enum": games}}, ["name"]))
     if MAC:
-        if c.apps:
-            out.append(_fn("open_app", "Open an app on your human's computer." + _SAY,
-                           {"name": {"type": "string", "enum": c.apps}}, ["name"]))
         out += [
             _fn("play_music", "Find music on Spotify and play it on your human's computer: a song, an artist, an "
                 "album or a playlist." + _SAY,
@@ -577,6 +727,7 @@ ACTIONS = {
     "search_web": controller.search_web,
     "open_website": controller.open_website,
     "open_app": controller.open_app,
+    "open_game": controller.open_game,
     "media": controller.media,
     "computer_volume": controller.computer_volume,
     "run_shortcut": controller.run_shortcut,
@@ -586,4 +737,4 @@ ACTIONS = {
 }
 # Done once they succeed and he has said his line: no second call to the model.
 # (now_playing isn't: he has to hear the answer to say it.)
-QUICK = {"search_web", "open_website", "open_app", "media", "computer_volume", "run_shortcut", "play_music"}
+QUICK = {"search_web", "open_website", "open_app", "open_game", "media", "computer_volume", "run_shortcut", "play_music"}

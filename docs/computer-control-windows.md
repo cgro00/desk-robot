@@ -3,14 +3,15 @@
 Rocky's computer control was built and tested on a Mac. On Windows (and
 Linux) only part of it works today:
 
-| Ask | Mac | Windows / Linux |
-|---|---|---|
-| "Look up an Arduino on Amazon" (searches) | yes | yes |
-| "Open YouTube" (sites and your bookmarks) | yes | yes |
-| "Open Spotify" (apps) | yes | not yet |
-| "Play Mr. Blue Sky", "pause", "next song", "what's playing?" | yes | not yet |
-| "Turn the volume down" | yes | not yet |
-| "Run Lights off" (Apple Shortcuts) | yes | no (Mac only) |
+| Ask | Mac | Windows | Linux |
+|---|---|---|---|
+| "Look up an Arduino on Amazon" (searches) | yes | yes | yes |
+| "Open YouTube" (sites and your bookmarks) | yes | yes | yes |
+| "Open Spotify" (apps) | yes | not yet | yes |
+| "Start Factorio" (installed Steam games) | no | not yet | yes |
+| "Play Mr. Blue Sky", "pause", "next song", "what's playing?" | yes | not yet | not yet |
+| "Turn the volume down" | yes | not yet | not yet |
+| "Run Lights off" (Apple Shortcuts) | yes | no (Mac only) | no (Mac only) |
 
 Searches and sites open in your default browser on any computer. On
 Windows and Linux the server doesn't offer the other abilities to the
@@ -117,6 +118,22 @@ Apple Shortcuts doesn't exist on Windows, so leave this one Mac only.
 
 ## Linux
 
-The same approach works with Linux tools: `xdg-open` for apps and links,
-`playerctl` for play / pause / skip and what's playing, and `wpctl` or
-`pactl` for the volume.
+**Apps** work: `open_app` looks the allowed name up among the desktop
+entries in `$XDG_DATA_HOME/applications` and each of `$XDG_DATA_DIRS`
+(the list an app launcher shows, by `Name=` or by the entry's id, hidden
+entries skipped) and starts it with `gtk-launch <id>` (or `gio launch`).
+Only an id found on disk is passed, never the model's text, and nothing
+goes through a shell. Tested on CachyOS with niri (Wayland).
+
+**Steam games** work: `open_game` offers the games installed in the Steam
+libraries (`libraryfolders.vdf`, then each library's `appmanifest_*.acf`;
+Proton, the Steam Linux Runtimes and Steamworks redistributables left out)
+and starts one with `steam steam://rungameid/<app id>`, the digits checked.
+The same reading would work on Windows and the Mac with their Steam paths.
+
+Still to do, with the same approach: `playerctl` for play / pause / skip
+and what's playing, and `wpctl` or `pactl` for the volume.
+
+The server needs the desktop session's environment (`WAYLAND_DISPLAY` or
+`DISPLAY`) to start apps, which it has when you start it from a terminal
+or as a systemd user service that runs after `graphical-session.target`.
