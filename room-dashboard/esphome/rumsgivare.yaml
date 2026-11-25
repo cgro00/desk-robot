@@ -1,0 +1,161 @@
+# ESPHome-konfiguration för en rumsgivare på ett ESP32-C3-kort, med moduler
+# från SunFounders Universal Maker Sensor Kit. Den skickar till Home
+# Assistant varje minut:
+#
+#   Temperatur      BMP280  (±1 °C, noggrannare än DHT11)
+#   Lufttryck       BMP280
+#   Luftfuktighet   DHT11   (±5 %)
+#   Ljus            fotoresistormodulen (relativt, 0-100 %, inte lux)
+#   Rörelse         PIR-modulen HC-SR501 (på/av)
+#
+# Koppla bara in det du vill ha och ta bort resten av blocken nedan.
+#
+# ── Koppling ────────────────────────────────────────────────────────────────
+# Siffrorna är GPIO-nummer. På en "ESP32-C3 SuperMini" och på Espressifs
+# DevKitM-1 står GPIO-numret tryckt vid stiftet. På en Seeed XIAO ESP32C3 står
+# D-namnet i stället: se kolumnen längst till höger.
+#
+#   Modul          Modulens stift     ESP32-C3              XIAO ESP32C3
+#   BMP280         VCC                3V3                   3V3
+#                  GND                GND                   GND
+#                  SDA                GPIO6                 D4
+#                  SCL                GPIO7                 D5
+#   DHT11          + / VCC            3V3                   3V3
+#                  - / GND            GND                   GND
+#                  S / DATA           GPIO10                D10
+#   Fotoresistor   VCC                3V3  (inte 5V!)       3V3
+#                  GND                GND                   GND
+#                  AO                 GPIO3                 D1
+#   PIR HC-SR501   VCC                5V                    5V
+#                  GND                GND                   GND
+#                  OUT                GPIO4                 D2
+#
+# PIR-modulen behöver 5 V för att driva sig själv, men dess OUT-signal är
+# 3,3 V och tål ESP32-C3:n. Allt annat ska ha 3V3.
+#
+# Använd INTE GPIO2, GPIO8 eller GPIO9 (styr hur kortet startar), GPIO18/19
+# (USB) eller GPIO20/21 (seriellport) till moduler.
+#
+# Hemligheterna (!secret) fyller du i under "Secrets" i ESPHome-panelen i
+# Home Assistant. Se room-dashboard/README.md.
+
+esphome:
+  name: rumsgivare
+  friendly_name: Rumsgivare
+
+esp32:
+  board: esp32-c3-devkitm-1   # fungerar för SuperMini; XIAO: seeed_xiao_esp32c3
+  variant: esp32c3
+
+logger:
+
+api:
+  encryption:
+    key: !secret rumsgivare_api_key
+
+ota:
+  - platform: esphome
+    encryption:
+      key: !secret rumsgivare_ota_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:   # om WiFi inte fungerar startar kortet ett eget nät att felsöka via
+    ssid: "Rumsgivare Fallback"
+    password: !secret rumsgivare_ap_password
+
+captive_portal:
+
+i2c:
+  sda: GPIO6
+  scl: GPIO7
+  scan: true   # loggen visar vilka adresser som svarar, t.ex. 0x76 för BMP280
+
+sensor:
+  # BMP280: temperatur och lufttryck. SunFounder kallar modulen "Temperature,
+  # Humidity & Pressure", men BMP280-chippet mäter inte fukt. Står det
+  # "Wrong chip ID" i loggen är det en BME280: byt då platform till
+  # bme280_i2c och lägg till ett humidity:-block.
+  - platform: bmp280_i2c
+    address: 0x76    # står det 0x77 i loggen efter "Found i2c device", byt hit
+    update_interval: 60s
+    temperature:
+      name: "Temperatur"          # blir sensor.rumsgivare_temperatur
+      filters:
+        - offset: 0.0             # visar den fel? t.ex. -1.0 om den visar en grad för varmt
+    pressure:
+      name: "Lufttryck"           # blir sensor.rumsgivare_lufttryck (hPa)
+
+  # DHT11: luftfuktigheten. Dess temperatur är sämre än BMP280:ns, så den
+  # syns bara i Home Assistant för jämförelse.
+  - platform: dht
+    pin: GPIO10
+    model: DHT11
+    update_interval: 60s
+    humidity:
+      name: "Luftfuktighet"       # blir sensor.rumsgivare_luftfuktighet
+    temperature:
+      name: "Temperatur DHT11"
+      entity_category: diagnostic
+
+  # Fotoresistorn: hur ljust det är, i procent. Det är ett relativt värde,
+  # bra för "lampan är tänd" eller "det har blivit mörkt", inte för lux.
+  - platform: adc
+    pin: GPIO3
+    id: ljus_volt
+    attenuation: 12db
+    update_interval: 2s
+    internal: true    # råspänningen behöver inte synas i Home Assistant
+  - platform: template
+    name: "Ljus"                  # blir sensor.rumsgivare_ljus
+    unit_of_measurement: "%"
+    icon: "mdi:brightness-6"
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: |-
+      // ESP32-C3 mäter som mest ungefär 2,5 V med 12 dB.
+      float v = id(ljus_volt).state;
+      if (isnan(v)) return NAN;
+      float pct = v / 2.5f * 100.0f;
+      // På de flesta moduler sjunker spänningen när det blir ljusare. Går
+      // procenten åt fel håll när du håller handen över givaren: ta bort raden.
+      pct = 100.0f - pct;
+      return std::max(0.0f, std::min(100.0f, pct));
+
+  # WiFi-signalen: bra för att se om kortet sitter för långt från routern.
+  - platform: wifi_signal
+    name: "WiFi-signal"
+    update_interval: 60s
+    entity_category: diagnostic
+
+binary_sensor:
+  # PIR: någon rör sig i rummet. Vrid modulens bygel till läge H ("repeat")
+  # så räknas den som på så länge det rör sig. Den behöver ungefär en minut
+  # efter start innan den är pålitlig.
+  - platform: gpio
+    pin: GPIO4
+    name: "Rörelse"               # blir binary_sensor.rumsgivare_rorelse
+    device_class: motion
+    filters:
+      - delayed_off: 2min         # stillasittande vid skrivbordet räknas fortfarande som närvaro
+
+# ── Valfritt ────────────────────────────────────────────────────────────────
+# OLED-skärmen (SSD1306) i satsen kan sitta på samma I2C-sladdar som BMP280
+# och visa värdena direkt på givaren. Ta bort # framför raderna nedan.
+#
+# font:
+#   - file: "gfonts://Roboto"
+#     id: typsnitt
+#     size: 16
+#
+# display:
+#   - platform: ssd1306_i2c
+#     model: "SSD1306 128x64"
+#     address: 0x3C
+#     lambda: |-
+#       it.printf(0, 0, id(typsnitt), "%.1f C", id(temp_bmp).state);
+#       it.printf(0, 22, id(typsnitt), "%.0f %% fukt", id(fukt).state);
+#
+# (Lägg då till "id: temp_bmp" under BMP280:ns temperature och
+#  "id: fukt" under DHT11:ans humidity.)
