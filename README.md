@@ -324,6 +324,41 @@ To have the dashboard there whenever you log in, run
 The brain also serves the Live part on <http://localhost:8767/> by itself,
 without settings or server buttons.
 
+### The face window
+
+No robot? A small floating window on your desktop shows his face instead:
+the same face pack, emotions, blinks and talking mouth as the OLED. It is a
+Rust program in `face-window/` (Linux, X11: any window manager or desktop).
+
+```bash
+cd face-window
+cargo build --release
+```
+
+Put `FACE_WINDOW=1` in `server/.env` and `launcher.py` opens it with the
+dashboard and closes it when it stops. It opens in the top-right corner of
+the monitor under the mouse, below any panel (`--margin N` sets the gap,
+`--scale 1|2|4|8` the size; default 2, 256 x 128), floats above other windows,
+stays on every workspace and keeps out of the taskbar.
+
+- **Click**: starts the brain if it is stopped, otherwise wakes him or puts
+  him to sleep.
+- **Drag** with the left button to move it. It never takes keyboard focus, so
+  clicking it leaves you typing where you were. It closes with the launcher.
+- He sleeps (with Zs) while the brain is stopped or after "goodnight";
+  otherwise he shows his current emotion and talks along with his voice.
+
+It only reads the brain's `/status`, so it doesn't take over the mic,
+speaker or camera the way a robot would. After rebuilding, swap the running
+window without restarting the launcher:
+
+```bash
+curl -X POST -H "X-Rocky-Console: 1" localhost:8766/launcher/face/restart
+```
+
+If your window manager still draws a frame around it, its window class is
+`Rocky`; on i3, for example: `for_window [class="^Rocky$"] border none`.
+
 ## Connect the robot to the brain
 
 1. Find your computer's address on your WiFi:

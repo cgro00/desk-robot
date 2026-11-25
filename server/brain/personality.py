@@ -189,3 +189,16 @@ ROCKY_PROMPT, ROCKY_LINES = SYSTEM_PROMPT, LINES   # his own, whoever is active 
 if config.CHARACTER:
     SYSTEM_PROMPT = _character_prompt(config.CHARACTER)
     LINES = {k: v.replace("{human}", config.HUMAN_NAME) for k, v in config.CHARACTER["lines"].items()}
+
+
+if config.HUNGARIAN:
+    _HU_RULE = ("LANGUAGE: Every reply is spoken to a Hungarian listener, so you ALWAYS speak Hungarian, even when "
+                "the question, the notes, the examples or these instructions are in English. Translate your own way of "
+                "talking into Hungarian (\"kérdés\", \"válasz\", \"csodálatos\"). Emotion tags stay in English.")
+    SYSTEM_PROMPT = f"{_HU_RULE}\n\n{SYSTEM_PROMPT}\n{_HU_RULE}\n"
+    LINES = {
+        "wake": "Kérdés?",
+        "sleep": "Alszom. Te figyelsz. Ébressz, ha találsz hibát.",
+        "track_on": f"Igen igen igen. Roky követ {config.HUMAN_NAME}.",
+        "track_off": "Rendben. Roky nem követ.",
+    }

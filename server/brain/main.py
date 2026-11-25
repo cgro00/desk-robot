@@ -1245,6 +1245,23 @@ def on_snapshot(jpeg: bytes) -> None:
     snapshot_arrived.set()
 
 
+def webcam_loop(device: str) -> None:
+    import cv2
+    cam = cv2.VideoCapture(device, cv2.CAP_V4L2)
+    cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cam.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    if not cam.isOpened():
+        print(f"webcam: can't open {device}")
+        return
+    print(f"webcam: {device} stands in for the robot's camera while it is offline")
+    while True:
+        ok, img = cam.read()
+        if ok and robot_socket is None:
+            eyes.push_frame(cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes(), upright=True)
+        time.sleep(1 / config.CAMERA_FPS)
+
+
 async def best_picture(since: float | None = None, wait: float = 1.0) -> bytes | None:
     """The sharpest picture taken after `since` (default: the last 4 s): a snapshot, waiting up to `wait` for one
     that's on its way (asking for one if none is), else the newest stream frame."""
@@ -1887,6 +1904,8 @@ async def main() -> None:
     watcher.react = watch_react
     perception.start()
     tracker.start()
+    if os.environ.get("WEBCAM"):
+        threading.Thread(target=webcam_loop, args=(os.environ["WEBCAM"],), daemon=True).start()
     print("face tracking:", "on" if config.TRACKING else f"off — say \"{config.ROBOT_NAME}, track me\" or type `track on`")
     print("type `ask <question>` to talk to the brain right now\n")
     # The robot's WebSocket library always sends "Origin: file://"; a browser always sends its page's origin.

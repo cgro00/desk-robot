@@ -143,13 +143,24 @@ if CHARACTER:
     TTS_MODEL = CHARACTER["tts_model"]
     TTS_ACTING = TTS_MODEL in _characters.ACTING_MODELS
     WAKE_PHRASES = CHARACTER["wake_words"]
-STT_MODEL = "base.en"    # faster-whisper model: base.en ~0.3 s per utterance on an Apple
+LANGUAGE = os.environ.get("ROCKY_LANGUAGE", "en")   # what he hears and speaks: "en", or e.g. "hu" (ROCKY_LANGUAGE in server/.env)
+HUNGARIAN = LANGUAGE == "hu"
+if HUNGARIAN:
+    WAKE_PHRASES += [f"{p} {n}" for p in ("hé", "szia", "helló", "hej") for n in (ROBOT_NAME.lower(), "roki")]
+STT_MODEL = os.environ.get("STT_MODEL") or ("base.en" if LANGUAGE == "en" else "small")
+                             # faster-whisper model: base.en ~0.3 s per utterance on an Apple
                          # Silicon Mac, small.en hears a little better but takes ~1 s
 # The Hugging Face commit of that model to download (Systran/faster-whisper-<STT_MODEL>).
 # Pinned so a changed upload can't be loaded unnoticed; set to None to take the latest.
-STT_REVISION = "3d3d5dee26484f91867d81cb899cfcf72b96be6c"
+STT_REVISION = "3d3d5dee26484f91867d81cb899cfcf72b96be6c" if STT_MODEL == "base.en" else None
+# Cloud speech-to-text (any OpenAI-style /audio/transcriptions API) instead of local Whisper, when STT_API_KEY is
+# set in server/.env. Defaults to OpenAI; for Groq set STT_BASE_URL=https://api.groq.com/openai/v1 and
+# STT_API_MODEL=whisper-large-v3-turbo. Falls back to local Whisper if a request fails.
+STT_API_KEY = os.environ.get("STT_API_KEY") or None
+STT_BASE_URL = os.environ.get("STT_BASE_URL") or None
+STT_API_MODEL = os.environ.get("STT_API_MODEL") or "gpt-4o-mini-transcribe"
 STT_THREADS = 8          # CPU threads for transcription (0 = library default of 4)
-STT_PROMPT = f"Hey {ROBOT_NAME}. {ROBOT_NAME} is a robot."  # name hint for the model
+STT_PROMPT = f"Hé {ROBOT_NAME}! {ROBOT_NAME} egy robot." if HUNGARIAN else f"Hey {ROBOT_NAME}. {ROBOT_NAME} is a robot."  # name hint for the model
 MIC_SOURCE = "auto"      # "robot" = the robot's mic, "mac" = MIC_DEVICE below,
                          # "auto" = robot when it's connected, else this computer
                          # (the dashboard's "He listens through" sets both: settings rocky.mic / mic_device)
@@ -186,6 +197,7 @@ SLEEP_PHRASES = [        # any of these puts him to sleep until the next "hey <n
     f"{_NAME} go to sleep",
     "go to sleep",
     "goodnight",
+    "jó éjt", "jó éjszakát", "aludj",
     "good night",
     "stop listening",
 ]
@@ -302,8 +314,8 @@ PICTIONARY_IDLE_S = 300.0          # no new drawing for this long: the game is o
 # Off until you ask ("Rocky, track me"); phrases below switch it without a
 # brain call, and Rocky can also switch it himself when asked in other words.
 TRACKING = False
-TRACK_ON_PHRASES = ["track me", "follow me", "watch me", "keep your eyes on me", "look at me"]
-TRACK_OFF_PHRASES = ["stop tracking", "stop following", "stop watching", "stop looking at me"]
+TRACK_ON_PHRASES = ["kövess", "figyelj rám", "track me", "follow me", "watch me", "keep your eyes on me", "look at me"]
+TRACK_OFF_PHRASES = ["ne kövess", "ne figyelj", "stop tracking", "stop following", "stop watching", "stop looking at me"]
 # What he says when tracking starts/stops: personality.py, LINES.
 # Camera field of view in HEAD degrees (how far the head turns to move something edge to edge), along the sensor's
 # long and short sides; the tracker swaps them itself when CAMERA_ROTATE turns the picture 90 degrees. Measured on
